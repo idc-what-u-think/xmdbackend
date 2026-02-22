@@ -16,12 +16,8 @@ const __dir   = dirname(fileURLToPath(import.meta.url))
 const CMDS    = join(__dir, '../commands')
 const WORKER  = 'https://firekidxmd-cloud.ahmedayomide1000.workers.dev'
 const PORT    = process.env.PORT || 3000
-const SECRET  = process.env.RENDER_SECRET
+const SECRET  = 'ahmed@ibmk'
 
-if (!SECRET) {
-  console.error('[FATAL] RENDER_SECRET is not set')
-  process.exit(0)
-}
 
 const WELCOME_IMAGES = [
   'https://i.ibb.co/n81GNX2q/photo-1-2026-02-21-16-33-08.jpg',
@@ -119,7 +115,7 @@ app.get('/internal/commands/bundle', auth, (req, res) => {
   res.json({ ok: true, files })
 })
 
-const startPairing = async (phone, pendingId, botMode) => {
+const startPairing = async (phone, pendingId, botMode, codeAlreadySent = false) => {
   console.log(`[Pair] Starting pairing for ${phone} (pendingId: ${pendingId})`)
   pairingSessions.set(pendingId, { phone, botMode, status: 'starting' })
 
@@ -142,7 +138,7 @@ const startPairing = async (phone, pendingId, botMode) => {
 
   sock.ev.on('creds.update', tempAuth.saveCreds)
 
-  let codeRequested = false
+  let codeRequested = codeAlreadySent
 
   const cleanup = () => {
     pairingSessions.delete(pendingId)
@@ -239,9 +235,23 @@ const startPairing = async (phone, pendingId, botMode) => {
 
     // ── DISCONNECTED ───────────────────────────────────────────────────────
     if (connection === 'close') {
-      clearTimeout(timeout)
       const code = lastDisconnect?.error?.output?.statusCode
       console.log(`[Pair] Connection closed, code: ${code} (pendingId: ${pendingId})`)
+
+      // 515 = stream error / restart required — WhatsApp accepted the code but
+      // dropped the socket mid-handshake. Reconnect once to complete the session.
+      if (code === 515) {
+        console.log(`[Pair] 515 restart required — reconnecting to complete session...`)
+        try { sock.end() } catch {}
+        await delay(2000)
+        startPairing(phone, pendingId, botMode, true).catch(e => {
+          console.error('[Pair] Reconnect after 515 failed:', e.message)
+          pairingSessions.delete(pendingId)
+        })
+        return
+      }
+
+      clearTimeout(timeout)
       cleanup()
     }
   })
