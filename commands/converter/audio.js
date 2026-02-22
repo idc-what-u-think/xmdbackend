@@ -170,38 +170,31 @@ export default [
 
       try {
         const ffmpeg = await getFFmpeg()
-        const inPath = tmp('mp3')
+        const inPath = tmp('ogg')
         const outPath = tmp('mp3')
         await writeFile(inPath, buffer)
-        await execAsync(`"${ffmpeg}" -y -i "${inPath}" -t 10 -q:a 5 "${outPath}"`)
-        const audioBuffer = await readFile(outPath)
+        await execAsync(`"${ffmpeg}" -y -i "${inPath}" -t 15 -ar 44100 -ac 1 -q:a 2 "${outPath}"`)
         await unlink(inPath).catch(() => {})
+
+        const { Shazam } = await import('node-shazam')
+        const shazam = new Shazam()
+        const result = await shazam.recognise(outPath, 'en-US')
         await unlink(outPath).catch(() => {})
 
-        const keyRes = await api.getKey('audd')
-        const auddKey = keyRes?.key || 'test'
-
-        const formData = new FormData()
-        const blob = new Blob([audioBuffer], { type: 'audio/mpeg' })
-        formData.append('file', blob, 'audio.mp3')
-        formData.append('return', 'spotify,deezer')
-        formData.append('api_token', auddKey)
-
-        const res = await fetch('https://api.audd.io/', { method: 'POST', body: formData })
-        const data = await res.json()
-
-        if (data.status !== 'success' || !data.result) {
+        if (!result?.track) {
           return sock.sendMessage(ctx.from, {
             edit: processing.key,
             text: `😔 *Song not recognized*\n\nTry with a clearer audio or longer clip.`
           })
         }
 
-        const song = data.result
-        const artist = song.artist || 'Unknown'
-        const title = song.title || 'Unknown'
-        const album = song.album || 'Unknown'
-        const year = song.release_date?.split('-')[0] || 'Unknown'
+        const track = result.track
+        const title = track.title || 'Unknown'
+        const artist = track.subtitle || 'Unknown'
+        const genre = track.genres?.primary || ''
+        const url = track.url || ''
+        const label = track.sections?.[0]?.metadata?.find(m => m.title === 'Label')?.text || ''
+        const year = track.sections?.[0]?.metadata?.find(m => m.title === 'Released')?.text || ''
 
         await sock.sendMessage(ctx.from, {
           edit: processing.key,
@@ -211,9 +204,10 @@ export default [
             ``,
             `🎤 *Title:*   ${title}`,
             `👤 *Artist:*  ${artist}`,
-            `💿 *Album:*   ${album}`,
-            `📅 *Year:*    ${year}`,
-            song.spotify?.external_urls?.spotify ? `\n🟢 *Spotify:* ${song.spotify.external_urls.spotify}` : ''
+            genre ? `🎸 *Genre:*   ${genre}` : '',
+            year ? `📅 *Year:*    ${year}` : '',
+            label ? `🏷️ *Label:*   ${label}` : '',
+            url ? `\n🔗 *Shazam:* ${url}` : ''
           ].filter(Boolean).join('\n')
         })
       } catch (err) {
