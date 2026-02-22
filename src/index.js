@@ -225,17 +225,20 @@ const startPairing = async (phone, pendingId, botMode, codeAlreadySent = false) 
 
       // ── WELCOME DM — send before anything else closes the socket ─────────
       try {
-        const img = randomImage()
-        await sock.sendMessage(ownerJid, {
-          image: { url: img },
-          caption: `*Welcome To Firekid Dex v1*
+        const img     = randomImage()
+        const caption = `*Welcome To Firekid Dex v1*
 
 Your bot is now live and ready to use.
 Type *.menu* to see all available commands.
 
 Session ID: ${sessionId}
-Add it to your Render env vars to keep your session active.`,
-        })
+Add it to your Render env vars to keep your session active.`
+        try {
+          await sock.sendMessage(ownerJid, { image: { url: img }, caption })
+        } catch {
+          // Image failed (timeout/fetch error) — fall back to text only
+          await sock.sendMessage(ownerJid, { text: caption })
+        }
         console.log(`[Pair] Welcome DM sent to ${ownerJid}`)
       } catch (e) {
         console.error(`[Pair] Welcome DM failed: ${e.message}`)
