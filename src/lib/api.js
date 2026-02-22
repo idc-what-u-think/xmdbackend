@@ -1,75 +1,55 @@
-const W = 'https://firekidxmd-cloud.ahmedayomide1000.workers.dev'
-const S = () => process.env.SESSION_ID
+// src/lib/api.js
+// Clean wrapper for every Worker API call the bot needs to make.
+
+const W = () => process.env.WORKER_URL
+const S = () => process.env.BOT_SECRET
+const B = () => process.env.BOT_ID || 'default'
 
 const call = async (path, opts = {}) => {
   try {
-    const r = await fetch(`${W}${path}`, {
+    const r = await fetch(`${W()}${path}`, {
       ...opts,
       headers: {
         'Content-Type': 'application/json',
-        'X-Session-Id': S(),
+        'X-Bot-Secret': S(),
         ...opts.headers,
       },
     })
     return await r.json()
   } catch (e) {
+    console.error(`[API] ${path} failed:`, e.message)
     return { ok: false, error: e.message }
   }
 }
 
 export const api = {
-  verify: () =>
-    call('/bot/session/verify'),
 
+  // ── Heartbeat ─────────────────────────────────────────
   heartbeat: (phone, groups, uptime) =>
     call('/bot/heartbeat', {
       method: 'POST',
-      body: JSON.stringify({ phone, groups, uptime }),
+      body: JSON.stringify({ botId: B(), phone, groups, uptime, status: 'online' }),
     }),
 
-  getCommands: () =>
-    call('/bot/commands'),
-
-  reloadCommands: () =>
-    call('/bot/commands/reload', { method: 'POST' }),
-
-  // ── Session KV ────────────────────────────────────────
-  sessionGet: (key) =>
-    call(`/bot/session/get?key=${encodeURIComponent(key)}`),
-
-  sessionSet: (key, value, ttl) =>
-    call('/bot/session/set', {
+  // ── Pair code ─────────────────────────────────────────
+  sendPairCode: (code, phone) =>
+    call('/bot/paircode', {
       method: 'POST',
-      body: JSON.stringify({ key, value, ttl }),
+      body: JSON.stringify({ botId: B(), code, phone }),
     }),
 
-  sessionDelete: (key) =>
-    call('/bot/session/delete', {
-      method: 'POST',
-      body: JSON.stringify({ key }),
-    }),
-
-  sessionList: (prefix) =>
-    call(`/bot/session/list?prefix=${encodeURIComponent(prefix || '')}`),
-
-  // ── Keys ──────────────────────────────────────────────
+  // ── API key rotation ──────────────────────────────────
+  // Returns { ok, key, remaining } or { ok: false, error: 'NO_KEY_AVAILABLE' }
   getKey: (service) =>
-    call(`/bot/key?service=${service}`),
-
-  // ── Plan ──────────────────────────────────────────────
-  getPlan: (jid) =>
-    call(`/bot/plan?jid=${encodeURIComponent(jid)}`),
+    call(`/keys/next?service=${service}&botId=${B()}`),
 
   // ── Group settings ────────────────────────────────────
   getGroupSettings: (gid) =>
     call(`/bot/gsettings?gid=${encodeURIComponent(gid)}`),
 
-  // FIXED: was missing — used by every anti/protection command
-  setGroupSettings: (gid, settings) =>
-    call('/bot/gsettings', {
-      method: 'POST',
-      body: JSON.stringify({ gid, settings }),
-    }),
+  // ── User plan ─────────────────────────────────────────
+  getUserPlan: (jid) =>
+    call(`/bot/plan?jid=${encodeURIComponent(jid)}`),
 
   // ── Warns ─────────────────────────────────────────────
   addWarn: (jid, groupId, reason, warnedBy) =>
@@ -77,17 +57,6 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ jid, groupId, reason, warnedBy }),
     }),
-
-  // FIXED: was missing — used by .resetwarn
-  resetWarns: (jid, groupId) =>
-    call('/bot/warn/reset', {
-      method: 'POST',
-      body: JSON.stringify({ jid, groupId }),
-    }),
-
-  // FIXED: was missing — used by .warnlist
-  getWarns: (jid, groupId) =>
-    call(`/bot/warns?${jid ? `jid=${encodeURIComponent(jid)}&` : ''}gid=${encodeURIComponent(groupId)}`),
 
   // ── Economy ───────────────────────────────────────────
   getEco: (jid) =>
@@ -98,8 +67,4 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ jid, field, value }),
     }),
-
-  // FIXED: was missing — used by .leaderboard
-  getLeaderboard: () =>
-    call('/bot/eco/leaderboard'),
 }
