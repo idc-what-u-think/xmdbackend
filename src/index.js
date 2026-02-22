@@ -34,7 +34,8 @@ const randomImage = () => WELCOME_IMAGES[Math.floor(Math.random() * WELCOME_IMAG
 const app = express()
 app.use(express.json())
 
-const pairingSessions = new Map()
+const pairingSessions = new Map()   // pendingId → { phone, sock, cleanup, ... }
+const phoneToSession  = new Map()   // phone → pendingId (one active pair per phone)
 
 const callWorker = async (path, opts = {}) => {
   const r = await fetch(`${WORKER}${path}`, {
@@ -64,8 +65,14 @@ app.post('/internal/pair', auth, async (req, res) => {
 
   const cleanPhone = phone.replace(/\D/g, '')
 
-  if (pairingSessions.has(pendingId)) {
-    return res.status(409).json({ ok: false, error: 'Pairing already in progress for this ID' })
+  // If this phone is already pairing, kill the old session first
+  const existingId = phoneToSession.get(cleanPhone)
+  if (existingId && pairingSessions.has(existingId)) {
+    console.log(`[Pair] Killing stale session ${existingId} for ${cleanPhone} before new pair`)
+    const stale = pairingSessions.get(existingId)
+    if (stale?.killSocket) stale.killSocket()
+    pairingSessions.delete(existingId)
+    phoneToSession.delete(cleanPhone)
   }
 
   res.json({ ok: true, message: 'Pairing started' })
@@ -73,6 +80,7 @@ app.post('/internal/pair', auth, async (req, res) => {
   startPairing(cleanPhone, pendingId, botMode || 'prod').catch(e => {
     console.error('[Pair] Error:', e.message)
     pairingSessions.delete(pendingId)
+    phoneToSession.delete(cleanPhone)
   })
 })
 
@@ -117,7 +125,8 @@ app.get('/internal/commands/bundle', auth, (req, res) => {
 
 const startPairing = async (phone, pendingId, botMode, codeAlreadySent = false) => {
   console.log(`[Pair] Starting pairing for ${phone} (pendingId: ${pendingId})`)
-  pairingSessions.set(pendingId, { phone, botMode, status: 'starting' })
+  phoneToSession.set(phone, pendingId)
+  pairingSessions.set(pendingId, { phone, botMode, status: 'starting', killSocket: null })
 
   const { version } = await fetchLatestBaileysVersion()
   console.log(`[Pair] Using Baileys WA version: ${version.join('.')}`)
@@ -136,12 +145,18 @@ const startPairing = async (phone, pendingId, botMode, codeAlreadySent = false) 
     getMessage: async () => ({ conversation: '' }),
   })
 
+  // Store killSocket handle so a new pair request for same phone can kill this socket
+  const sessionEntry = pairingSessions.get(pendingId)
+  if (sessionEntry) sessionEntry.killSocket = () => { try { sock.end() } catch {} }
+
   sock.ev.on('creds.update', tempAuth.saveCreds)
 
-  let codeRequested = codeAlreadySent
+  let codeRequested    = codeAlreadySent
+  let sessionFinalized = false
 
   const cleanup = () => {
     pairingSessions.delete(pendingId)
+    phoneToSession.delete(phone)
     try { sock.end() } catch {}
   }
 
@@ -202,41 +217,48 @@ const startPairing = async (phone, pendingId, botMode, codeAlreadySent = false) 
         body: JSON.stringify({ sessionId, phone: userPhone, ownerJid, botMode, pendingId }),
       })
 
-      // Update dashboard pair status with the new sessionId
-      await callWorker('/render/paircode', {
-        method: 'POST',
-        body: JSON.stringify({ pendingId, code: sessionId, phone: userPhone }),
-      })
-
       pairingSessions.set(pendingId, {
         ...pairingSessions.get(pendingId),
         sessionId,
         status: 'connected',
       })
 
+      sessionFinalized = true
       console.log(`[Pair] Session finalized: ${sessionId} for ${userPhone}`)
 
       // ── WELCOME DM ────────────────────────────────────────────────────────
-      // Send a welcome message to the bot owner's own chat (bot messages itself)
       try {
-        await delay(2000)
+        await delay(3000)
         const img = randomImage()
         await sock.sendMessage(ownerJid, {
           image: { url: img },
-          caption: `*Welcome To Firekid Dex v1*\n\nYour bot is now live and ready to use.\nType *.menu* to see all available commands.\n\nSession ID has been saved — add it to your Render environment variables to keep your session active.`,
+          caption: `*Welcome To Firekid Dex v1*
+
+Your bot is now live and ready to use.
+Type *.menu* to see all available commands.
+
+Session ID: ${sessionId}
+Add it to your Render env vars to keep your session active.`,
         })
         console.log(`[Pair] Welcome DM sent to ${ownerJid}`)
       } catch (e) {
         console.error(`[Pair] Welcome DM failed: ${e.message}`)
       }
 
-      setTimeout(cleanup, 8000)
+      cleanup()
     }
 
     // ── DISCONNECTED ───────────────────────────────────────────────────────
     if (connection === 'close') {
       const code = lastDisconnect?.error?.output?.statusCode
       console.log(`[Pair] Connection closed, code: ${code} (pendingId: ${pendingId})`)
+
+      // If session already finalized, 500 is just the socket closing normally — ignore
+      if (sessionFinalized) {
+        console.log(`[Pair] Socket closed after finalized session (code: ${code}) — normal`)
+        clearTimeout(timeout)
+        return
+      }
 
       // 515 = stream error / restart required — WhatsApp accepted the code but
       // dropped the socket mid-handshake. Reconnect once to complete the session.
