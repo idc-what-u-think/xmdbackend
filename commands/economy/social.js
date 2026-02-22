@@ -22,6 +22,7 @@ export default [
       }, { quoted: msg })
     }
   },
+
   {
     command: 'leaderboard',
     aliases: ['richlist', 'top', 'lb'],
@@ -36,6 +37,7 @@ export default [
       }, { quoted: msg })
     }
   },
+
   {
     command: 'rank',
     aliases: ['level', 'myrank'],
@@ -56,24 +58,27 @@ export default [
       }, { quoted: msg })
     }
   },
+
   {
-    command: 'premium',
-    aliases: ['upgrade', 'vip'],
+    // Renamed from 'premium' to 'upgrade' to avoid clash with owner/access.js premium command
+    command: 'upgrade',
+    aliases: ['vip', 'buypremium', 'getpremium'],
     handler: async (sock, msg, ctx, { api }) => {
       await sock.sendMessage(ctx.from, {
         text: [
           `💎 *Get Premium*`,
+          `${'─'.repeat(28)}`,
           ``,
           `Upgrade your account to unlock:`,
           `• +50% daily reward bonus`,
           `• +25% work bonus`,
           `• Priority support`,
-          `• Exclusive premium commands`,
+          `• Access to premium-only commands`,
           ``,
-          `🌐 *Visit the dashboard to upgrade:*`,
-          `https://firekid-worker.ahmedayomide1000.workers.dev`,
+          `*Visit the dashboard to buy premium:*`,
+          `https://wa-dashboard-7e4.pages.dev`,
           ``,
-          `_Login and go to your profile to upgrade._`
+          `_Login with your WhatsApp number and purchase from your profile._`
         ].join('\n')
       }, { quoted: msg })
     }
