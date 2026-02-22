@@ -223,30 +223,46 @@ const startPairing = async (phone, pendingId, botMode, codeAlreadySent = false) 
         status: 'connected',
       })
 
-      // ── WELCOME DM — send before anything else closes the socket ─────────
-      try {
-        const img     = randomImage()
-        const caption = `*Welcome To Firekid Dex v1*
-
-Your bot is now live and ready to use.
-Type *.menu* to see all available commands.
-
-Session ID: ${sessionId}
-Add it to your Render env vars to keep your session active.`
-        try {
-          await sock.sendMessage(ownerJid, { image: { url: img }, caption })
-        } catch {
-          // Image failed (timeout/fetch error) — fall back to text only
-          await sock.sendMessage(ownerJid, { text: caption })
-        }
-        console.log(`[Pair] Welcome DM sent to ${ownerJid}`)
-      } catch (e) {
-        console.error(`[Pair] Welcome DM failed: ${e.message}`)
-      }
-
       sessionFinalized = true
       console.log(`[Pair] Session finalized: ${sessionId} for ${userPhone}`)
-      cleanup()
+
+      // ── WELCOME DM ───────────────────────────────────────────────────────
+      // Send text first (instant) so user definitely gets something,
+      // then send the image separately with a delay to avoid URL-fetch timeout.
+      // cleanup() is called AFTER both sends so the socket stays alive long enough.
+      ;(async () => {
+        try {
+          // 1. Text message — no URL fetch, arrives instantly
+          await sock.sendMessage(ownerJid, {
+            text: [
+              `*Welcome To Firekid Dex v1* 🔥`,
+              ``,
+              `Your bot is now live and ready to use!`,
+              ``,
+              `*Session ID:*`,
+              `\`${sessionId}\``,
+              ``,
+              `Add this to your Render environment variables as *SESSION_ID* to keep your session active.`,
+              ``,
+              `Type *.menu* to see all available commands.`,
+            ].join('\n'),
+          })
+          console.log(`[Pair] Welcome text DM sent to ${ownerJid}`)
+
+          // 2. Wait 3s then send the image — gives WhatsApp time to download URL
+          await delay(3000)
+          await sock.sendMessage(ownerJid, {
+            image: { url: randomImage() },
+            caption: `*Firekid Dex v1* — Ready 🔥`,
+          })
+          console.log(`[Pair] Welcome image DM sent to ${ownerJid}`)
+        } catch (e) {
+          console.error(`[Pair] Welcome DM failed: ${e.message}`)
+        } finally {
+          // Always cleanup after DM attempt, success or fail
+          cleanup()
+        }
+      })()
     }
 
     // ── DISCONNECTED ───────────────────────────────────────────────────────
