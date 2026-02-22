@@ -223,12 +223,8 @@ const startPairing = async (phone, pendingId, botMode, codeAlreadySent = false) 
         status: 'connected',
       })
 
-      sessionFinalized = true
-      console.log(`[Pair] Session finalized: ${sessionId} for ${userPhone}`)
-
-      // ── WELCOME DM ────────────────────────────────────────────────────────
+      // ── WELCOME DM — send before anything else closes the socket ─────────
       try {
-        await delay(3000)
         const img = randomImage()
         await sock.sendMessage(ownerJid, {
           image: { url: img },
@@ -245,6 +241,8 @@ Add it to your Render env vars to keep your session active.`,
         console.error(`[Pair] Welcome DM failed: ${e.message}`)
       }
 
+      sessionFinalized = true
+      console.log(`[Pair] Session finalized: ${sessionId} for ${userPhone}`)
       cleanup()
     }
 
