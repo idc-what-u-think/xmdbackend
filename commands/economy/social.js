@@ -1,103 +1,412 @@
-const FC = '🔥'
+// confession + suggest now use session KV (survives restarts)
+// confessionStore / suggestionStore in-memory Maps removed
 
 export default [
-
   {
-    command: 'transfer',
-    aliases: ['give', 'send', 'pay'],
-    category: 'economy',
-    description: 'Transfer FireCoins to another user',
-    usage: '.transfer @user <amount>',
-    example: '.transfer @2348012345678 500',
-
+    command: 'gcannounce',
+    aliases: ['announce', 'pinmsg', 'announcement'],
+    category: 'social',
+    groupOnly: true,
+    adminOnly: true,
     handler: async (sock, msg, ctx, { api }) => {
-      const target = ctx.mentionedJids[0]
-      const amount = parseInt(ctx.args.find(a => !a.startsWith('@') && !isNaN(a)))
-
-      if (!target || isNaN(amount) || amount < 1) {
+      if (!ctx.query) {
         return sock.sendMessage(ctx.from, {
-          text: `💸 *Transfer*\n\nUsage: ${ctx.prefix}transfer @user <amount>`
+          text: `❌ Provide announcement text.\n📌 *Usage:* ${ctx.prefix}gcannounce <message>`
         }, { quoted: msg })
       }
 
-      if (target === ctx.sender) {
-        return sock.sendMessage(ctx.from, { text: `❌ Cannot transfer to yourself.` }, { quoted: msg })
-      }
-
-      const res = await api.getEco(ctx.senderStorageJid || ctx.sender)
-      const eco = res?.eco || {}
-
-      if ((eco.balance ?? 0) < amount) {
-        return sock.sendMessage(ctx.from, {
-          text: `❌ Not enough coins! Balance: *${eco.balance ?? 0} ${FC}*`
-        }, { quoted: msg })
-      }
-
-      const targetRes = await api.getEco(target)
-      const targetEco = targetRes?.eco || {}
-
-      await Promise.all([
-        api.setEco(ctx.senderStorageJid || ctx.sender, 'balance', (eco.balance ?? 0) - amount),
-        api.setEco(target, 'balance', (targetEco.balance ?? 0) + amount),
-      ])
+      const groupName = ctx.groupMeta?.subject || 'Group'
+      const time = new Date().toLocaleString('en-GB', {
+        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+        hour: '2-digit', minute: '2-digit'
+      })
 
       await sock.sendMessage(ctx.from, {
         text: [
-          `💸 *Transfer Complete*`,
+          `📣 *ANNOUNCEMENT*`,
+          `${'═'.repeat(30)}`,
           ``,
-          `✅ Sent *${amount} ${FC}* to @${target.split('@')[0]}`,
+          ctx.query,
           ``,
-          `💰 Your new balance: *${(eco.balance ?? 0) - amount} ${FC}*`
-        ].join('\n'),
-        mentions: [target]
+          `${'═'.repeat(30)}`,
+          `📍 *${groupName}*`,
+          `🕐 ${time}`,
+          ``,
+          `_— Admin Notice_`
+        ].join('\n')
       }, { quoted: msg })
     }
   },
 
   {
-    command: 'gift',
-    aliases: ['gifted'],
-    category: 'economy',
-    description: 'Gift a random amount of coins to someone',
-    usage: '.gift @user',
-    example: '.gift @2348012345678',
-
+    command: 'spotlight',
+    aliases: ['memberofday', 'feature', 'highlight'],
+    category: 'social',
+    groupOnly: true,
     handler: async (sock, msg, ctx, { api }) => {
-      const target = ctx.mentionedJids[0] || ctx.quotedSender
-      if (!target) {
+      const targetJid = ctx.mentionedJids[0] || (() => {
+        const parts = ctx.groupMeta?.participants || []
+        const nonBots = parts.filter(p => p.id !== ctx.botId)
+        return nonBots[Math.floor(Math.random() * nonBots.length)]?.id
+      })()
+
+      if (!targetJid) {
         return sock.sendMessage(ctx.from, {
-          text: `❌ Tag or reply to the user.\n📌 *Usage:* ${ctx.prefix}gift @user`
+          text: `❌ No member found.\n📌 *Usage:* ${ctx.prefix}spotlight @user`
         }, { quoted: msg })
       }
 
-      if (target === ctx.sender) {
-        return sock.sendMessage(ctx.from, { text: `❌ Cannot gift yourself.` }, { quoted: msg })
+      const num = targetJid.split('@')[0]
+      const parts = ctx.groupMeta?.participants || []
+      const memberInfo = parts.find(p => p.id === targetJid)
+      const role = memberInfo?.admin === 'superadmin' ? '👑 Owner' :
+                   memberInfo?.admin === 'admin' ? '⭐ Admin' : '👤 Member'
+
+      let ppUrl
+      try { ppUrl = await sock.profilePictureUrl(targetJid, 'image') } catch {}
+
+      const text = [
+        `🌟 *MEMBER SPOTLIGHT*`,
+        `${'═'.repeat(28)}`,
+        ``,
+        `👤 @${num}`,
+        `🏷️  Role:    ${role}`,
+        `📱 Number:  +${num}`,
+        ``,
+        `✨ This member is appreciated in *${ctx.groupMeta?.subject || 'this group'}*!`,
+        ``,
+        `Give them some love 💙`
+      ].join('\n')
+
+      if (ppUrl) {
+        await sock.sendMessage(ctx.from, { image: { url: ppUrl }, caption: text, mentions: [targetJid] }, { quoted: msg })
+      } else {
+        await sock.sendMessage(ctx.from, { text, mentions: [targetJid] }, { quoted: msg })
       }
+    }
+  },
 
-      const res = await api.getEco(ctx.senderStorageJid || ctx.sender)
-      const eco = res?.eco || {}
-      const max = Math.min(200, Math.floor((eco.balance ?? 0) * 0.1))
+  {
+    command: 'groupmood',
+    aliases: ['mood', 'vibe'],
+    category: 'social',
+    groupOnly: true,
+    handler: async (sock, msg, ctx, { api }) => {
+      const parts = ctx.groupMeta?.participants || []
+      const admins = parts.filter(p => p.admin)
+      const memberCount = parts.length
 
-      if (max < 10) {
-        return sock.sendMessage(ctx.from, {
-          text: `❌ Not enough coins to gift. Earn more with ${ctx.prefix}work or ${ctx.prefix}daily`
-        }, { quoted: msg })
-      }
+      const MOODS = [
+        { mood: '💀 DEAD', desc: `This group hasn't moved in days. Someone say something. Anything.` },
+        { mood: '🔥 ON FIRE', desc: `Messages flying in every direction. Pure chaos. We love to see it.` },
+        { mood: '😂 COMEDY HOUR', desc: `Someone dropped a banger joke and now everyone's a comedian.` },
+        { mood: '👻 GHOST TOWN', desc: `${memberCount} members. Zero conversation. The silence is LOUD.` },
+        { mood: '☕ DRAMA BREWING', desc: `Something is simmering beneath the surface. Choose your words carefully.` },
+        { mood: '😴 SLEEP MODE', desc: `The group is in sleep mode. Do not disturb.` },
+        { mood: '🤯 UNHINGED', desc: `Nobody knows what's happening and nobody is in control. Beautiful.` },
+        { mood: '💬 CHATTY', desc: `People are actually talking! Look at them! Communicating! Wild!` },
+        { mood: '🥶 ICY', desc: `The vibes in here are COLD. Someone say something warm.` },
+        { mood: '🎉 FESTIVE', desc: `Good energy! People are hyped. Whatever's happening, keep it going.` },
+      ]
 
-      const gift      = Math.floor(Math.random() * max) + 10
-      const targetRes = await api.getEco(target)
-      const targetEco = targetRes?.eco || {}
-
-      await Promise.all([
-        api.setEco(ctx.senderStorageJid || ctx.sender, 'balance', (eco.balance ?? 0) - gift),
-        api.setEco(target, 'balance', (targetEco.balance ?? 0) + gift),
-      ])
+      const selected = MOODS[Math.floor(Math.random() * MOODS.length)]
 
       await sock.sendMessage(ctx.from, {
-        text: `🎁 @${ctx.senderNumber} gifted *${gift} ${FC}* to @${target.split('@')[0]}! 🎉`,
-        mentions: [ctx.sender, target]
+        text: [
+          `🌡️ *Group Mood Analysis*`,
+          `${'─'.repeat(28)}`,
+          ``,
+          `📊 *Group:* ${ctx.groupMeta?.subject || 'This Group'}`,
+          `👥 *Members:* ${memberCount}`,
+          `⭐ *Admins:* ${admins.length}`,
+          ``,
+          `Current mood: *${selected.mood}*`,
+          ``,
+          selected.desc
+        ].join('\n')
       }, { quoted: msg })
     }
   },
 
+  // ── confession — now persisted in session KV ─────────────────────────────
+  {
+    command: 'confession',
+    aliases: ['confess', 'anonymous'],
+    category: 'social',
+    groupOnly: true,
+    handler: async (sock, msg, ctx, { api }) => {
+      if (!ctx.query) {
+        return sock.sendMessage(ctx.from, {
+          text: [
+            `🙈 *Anonymous Confession*`,
+            ``,
+            `Post a confession to the group — nobody will know it's you.`,
+            ``,
+            `📌 *Usage:* ${ctx.prefix}confession <your secret>`,
+          ].join('\n')
+        }, { quoted: msg })
+      }
+
+      if (ctx.query.length > 500) {
+        return sock.sendMessage(ctx.from, { text: `❌ Confession too long. Max 500 characters.` }, { quoted: msg })
+      }
+
+      const confessId = Date.now().toString(36).toUpperCase()
+      const kvKey = `confessions:${ctx.from}`
+
+      const existing = await api.sessionGet(kvKey)
+      const list = existing?.value ? JSON.parse(existing.value) : []
+      list.push({ id: confessId, text: ctx.query, timestamp: Date.now() })
+      if (list.length > 50) list.shift()
+      await api.sessionSet(kvKey, JSON.stringify(list))
+
+      try {
+        await sock.sendMessage(ctx.sender, {
+          text: [`✅ *Confession Sent!*`, ``, `Your confession #${confessId} has been posted anonymously.`].join('\n')
+        })
+      } catch {}
+
+      await sock.sendMessage(ctx.from, {
+        text: [
+          `🙈 *Anonymous Confession #${confessId}*`,
+          `${'═'.repeat(28)}`,
+          ``,
+          ctx.query,
+          ``,
+          `${'═'.repeat(28)}`,
+          `_Post yours: ${ctx.prefix}confession <text>_`
+        ].join('\n')
+      })
+    }
+  },
+
+  // ── suggest — now persisted in session KV ────────────────────────────────
+  {
+    command: 'suggest',
+    aliases: ['suggestion', 'idea'],
+    category: 'social',
+    groupOnly: true,
+    handler: async (sock, msg, ctx, { api }) => {
+      if (!ctx.query) {
+        return sock.sendMessage(ctx.from, {
+          text: [
+            `💡 *Anonymous Suggestion Box*`,
+            ``,
+            `Drop ideas for the group anonymously.`,
+            `Admins can review with ${ctx.prefix}suggestions`,
+            ``,
+            `📌 *Usage:* ${ctx.prefix}suggest <your idea>`,
+          ].join('\n')
+        }, { quoted: msg })
+      }
+
+      if (ctx.query.length > 300) {
+        return sock.sendMessage(ctx.from, { text: `❌ Suggestion too long. Max 300 characters.` }, { quoted: msg })
+      }
+
+      const suggId = Date.now().toString(36).toUpperCase()
+      const kvKey = `suggestions:${ctx.from}`
+
+      const existing = await api.sessionGet(kvKey)
+      const list = existing?.value ? JSON.parse(existing.value) : []
+      list.push({ id: suggId, text: ctx.query, timestamp: Date.now() })
+      if (list.length > 50) list.shift()
+      await api.sessionSet(kvKey, JSON.stringify(list))
+
+      try {
+        await sock.sendMessage(ctx.sender, {
+          text: `✅ *Suggestion submitted!*\n\nYour suggestion #${suggId} is pending admin review. Posted anonymously.`
+        })
+      } catch {}
+
+      await sock.sendMessage(ctx.from, {
+        text: [
+          `💡 *New Suggestion #${suggId}*`,
+          `${'─'.repeat(28)}`,
+          ``,
+          ctx.query,
+          ``,
+          `_Admins: use ${ctx.prefix}suggestions to view all_`
+        ].join('\n')
+      })
+    }
+  },
+
+  // ── suggestions — reads from KV ──────────────────────────────────────────
+  {
+    command: 'suggestions',
+    aliases: ['viewsuggestions', 'suggestionlist'],
+    category: 'social',
+    groupOnly: true,
+    adminOnly: true,
+    handler: async (sock, msg, ctx, { api }) => {
+      const kvKey = `suggestions:${ctx.from}`
+      const existing = await api.sessionGet(kvKey)
+      const list = existing?.value ? JSON.parse(existing.value) : []
+
+      if (!list.length) {
+        return sock.sendMessage(ctx.from, {
+          text: `💡 *Suggestion Box — Empty*\n\nNo pending suggestions.\n_Members can submit: ${ctx.prefix}suggest <text>_`
+        }, { quoted: msg })
+      }
+
+      const lines = list.map((s, i) => {
+        const date = new Date(s.timestamp).toLocaleDateString('en-GB')
+        return `${i + 1}. *#${s.id}* — ${date}\n    "${s.text}"`
+      })
+
+      await sock.sendMessage(ctx.from, {
+        text: [
+          `💡 *Suggestions (${list.length})*`,
+          `${'─'.repeat(28)}`,
+          ``,
+          lines.join('\n\n'),
+          ``,
+          `_Clear: ${ctx.prefix}clearsuggestions_`
+        ].join('\n')
+      }, { quoted: msg })
+    }
+  },
+
+  // ── clearsuggestions — deletes KV key ────────────────────────────────────
+  {
+    command: 'clearsuggestions',
+    aliases: ['deletesuggestions'],
+    category: 'social',
+    groupOnly: true,
+    adminOnly: true,
+    handler: async (sock, msg, ctx, { api }) => {
+      await api.sessionDelete(`suggestions:${ctx.from}`)
+      await sock.sendMessage(ctx.from, { text: `✅ All suggestions cleared.` }, { quoted: msg })
+    }
+  },
+
+  {
+    command: 'todayinhistory',
+    aliases: ['onthisday', 'history'],
+    category: 'social',
+    groupOnly: true,
+    handler: async (sock, msg, ctx, { api }) => {
+      const now = new Date()
+      const month = now.getMonth() + 1
+      const day = now.getDate()
+
+      const HISTORY = {
+        '1-1':  { year: 1863, event: 'The Emancipation Proclamation went into effect in the United States.' },
+        '3-6':  { year: 1957, event: 'Ghana became the first sub-Saharan African country to gain independence from colonial rule.' },
+        '4-4':  { year: 1968, event: 'Martin Luther King Jr. was assassinated in Memphis, Tennessee.' },
+        '5-25': { year: 1977, event: 'Star Wars: A New Hope was first released in cinemas.' },
+        '7-20': { year: 1969, event: 'Apollo 11 landed on the moon. Neil Armstrong took his first steps.' },
+        '10-1': { year: 1960, event: 'Nigeria gained independence from Britain. 🇳🇬' },
+        '11-9': { year: 1989, event: 'The Berlin Wall fell, reuniting East and West Germany.' },
+      }
+
+      const key   = `${month}-${day}`
+      const entry = HISTORY[key]
+      const FALLBACK = [
+        `Many great things have happened on ${now.toLocaleDateString('en-GB', { month: 'long', day: 'numeric' })} throughout history. Each day carries the weight of the past and the promise of tomorrow. 🌍`,
+        `History is being made every single day — including today. Whatever you do today might be remembered tomorrow. Make it count. ⏳`,
+      ]
+
+      const eventText = entry
+        ? `🗓️ *On this day, ${entry.year}:*\n\n${entry.event}`
+        : `🗓️ *Today in History*\n\n${FALLBACK[day % FALLBACK.length]}`
+
+      await sock.sendMessage(ctx.from, {
+        text: [
+          eventText,
+          ``,
+          `📅 *${now.toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}*`
+        ].join('\n')
+      }, { quoted: msg })
+    }
+  },
+
+  {
+    command: 'groupwrap',
+    aliases: ['yearwrap', 'wrapped'],
+    category: 'social',
+    groupOnly: true,
+    handler: async (sock, msg, ctx, { api }) => {
+      const parts   = ctx.groupMeta?.participants || []
+      const admins  = parts.filter(p => p.admin)
+      const groupName = ctx.groupMeta?.subject || 'This Group'
+      const groupCreated = ctx.groupMeta?.creation
+        ? new Date(ctx.groupMeta.creation * 1000).toLocaleDateString('en-GB', { year: 'numeric', month: 'long' })
+        : 'Unknown'
+
+      const randomMember = parts[Math.floor(Math.random() * parts.length)]
+      const randomAdmin  = admins[Math.floor(Math.random() * admins.length)]
+
+      const ACHIEVEMENTS = [
+        '🏆 Survived another year without group drama (mostly)',
+        '🔥 Broke the record for most back-to-back ignored messages',
+        `👻 Achieved ghost member levels never seen before`,
+        '💬 Sent thousands of messages while saying nothing useful',
+      ]
+
+      const randomAchievement = ACHIEVEMENTS[Math.floor(Math.random() * ACHIEVEMENTS.length)]
+
+      await sock.sendMessage(ctx.from, {
+        text: [
+          `🎁 *${groupName} — Year Wrapped*`,
+          `${'═'.repeat(28)}`,
+          ``,
+          `📊 *Group Stats:*`,
+          `  👥 Total Members: ${parts.length}`,
+          `  ⭐ Admins:        ${admins.length}`,
+          `  📅 Group Since:   ${groupCreated}`,
+          ``,
+          `🌟 *Spotlight:*`,
+          `  🏅 Random MVP: @${randomMember?.id?.split('@')[0] || 'Unknown'}`,
+          randomAdmin ? `  👑 Top Admin:  @${randomAdmin.id.split('@')[0]}` : '',
+          ``,
+          `🏆 *Achievement Unlocked:*`,
+          randomAchievement,
+          ``,
+          `Here's to another year together! 🥂`,
+          `${'═'.repeat(28)}`
+        ].filter(l => l !== '').join('\n'),
+        mentions: [randomMember?.id, randomAdmin?.id].filter(Boolean)
+      }, { quoted: msg })
+    }
+  },
+
+  {
+    command: 'gcstatus',
+    aliases: ['groupstatus', 'channelpost', 'gcpost'],
+    category: 'social',
+    groupOnly: true,
+    adminOnly: true,
+    handler: async (sock, msg, ctx, { api }) => {
+      if (!ctx.query) {
+        return sock.sendMessage(ctx.from, {
+          text: [`📢 *Group Channel Post*`, ``, `Post to this group's linked WA Channel.`, ``, `📌 *Usage:* ${ctx.prefix}gcstatus <message>`].join('\n')
+        }, { quoted: msg })
+      }
+
+      try {
+        const groupInfo = await sock.groupMetadata(ctx.from)
+        const linkedJid = groupInfo?.linkedParent || groupInfo?.linkedNewsletterJid
+
+        if (!linkedJid) {
+          return sock.sendMessage(ctx.from, {
+            text: `❌ *No linked channel found.*\n\nLink one in group settings → "Link a channel".`
+          }, { quoted: msg })
+        }
+
+        await sock.newsletterSendMessage(linkedJid, {
+          text: [ctx.query, ``, `— *${ctx.groupMeta?.subject || 'Group Update'}*`, `📅 ${new Date().toLocaleDateString('en-GB')}`].join('\n')
+        })
+
+        await sock.sendMessage(ctx.from, {
+          text: `✅ *Posted to linked channel!*\n\n_"${ctx.query.slice(0, 60)}${ctx.query.length > 60 ? '...' : ''}"_`
+        }, { quoted: msg })
+      } catch (err) {
+        await sock.sendMessage(ctx.from, {
+          text: `❌ Failed to post to channel: ${err.message}`
+        }, { quoted: msg })
+      }
+    }
+  },
 ]
