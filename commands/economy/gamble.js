@@ -1,86 +1,157 @@
-const FC = '🔥'
-const MIN = 10
-const MAX = 10000
-const SYMS   = ['🍋','🍊','🍇','🍒','💎','🔥','7️⃣']
-const MULT   = { '🍋':2,'🍊':2.5,'🍇':3,'🍒':4,'💎':6,'🔥':8,'7️⃣':10 }
-const WEIGHT = [30,25,20,15,5,3,2]
-
-const spin = () => {
-  let r = Math.random() * 100, c = 0
-  for (let i = 0; i < SYMS.length; i++) { c += WEIGHT[i]; if (r < c) return SYMS[i] }
-  return SYMS[0]
-}
-
-const parseBet = (s, bal) => {
-  if (!s) return null
-  const l = s.toLowerCase()
-  if (l === 'all' || l === 'allin') return bal
-  if (l === 'half') return Math.floor(bal / 2)
-  const n = parseInt(l.replace(/,/g,''), 10)
-  return isNaN(n) ? null : n
-}
-
-const checkBet = (bet, bal, sock, ctx, msg) => {
-  if (!bet || bet < 1) return sock.sendMessage(ctx.from, { text: '❌ Invalid amount.' }, { quoted: msg })
-  if (bet < MIN) return sock.sendMessage(ctx.from, { text: `❌ Min bet is *${MIN} ${FC}*` }, { quoted: msg })
-  if (bet > MAX) return sock.sendMessage(ctx.from, { text: `❌ Max bet is *${MAX} ${FC}*` }, { quoted: msg })
-  if (bet > bal) return sock.sendMessage(ctx.from, { text: `❌ Not enough. Balance: *${bal} ${FC}*` }, { quoted: msg })
-  return null
-}
+const FC  = '🔥'
+const now = () => Math.floor(Date.now() / 1000)
 
 export default [
+
   {
     command: 'gamble',
-    aliases: ['bet', 'casino'],
+    aliases: ['bet', 'slots'],
+    category: 'economy',
+    description: 'Gamble your FireCoins on the slots',
+    usage: '.gamble <amount>',
+    example: '.gamble 100',
+
     handler: async (sock, msg, ctx, { api }) => {
-      if (!ctx.query) return sock.sendMessage(ctx.from, { text: `🎰 *Usage:* ${ctx.prefix}gamble <amount|all|half>\n_Min: ${MIN} ${FC} | Max: ${MAX} ${FC}_` }, { quoted: msg })
-      const res = await api.getEco(ctx.sender)
-      const eco = res.eco || {}
-      const bal = eco.balance ?? 0
-      const bet = parseBet(ctx.query, bal)
-      const err = checkBet(bet, bal, sock, ctx, msg)
-      if (err) return err
-      const won    = Math.random() < 0.45
-      const newBal = Math.max(0, won ? bal + bet : bal - bet)
-      await api.setEco(ctx.sender, 'balance', newBal)
+      const amount = parseInt(ctx.query)
+      if (isNaN(amount) || amount < 10) {
+        return sock.sendMessage(ctx.from, {
+          text: `🎰 *Slots*\n\nUsage: ${ctx.prefix}gamble <amount>\nMinimum bet: *10 ${FC}*`
+        }, { quoted: msg })
+      }
+
+      const res = await api.getEco(ctx.senderStorageJid || ctx.sender)
+      const eco = res?.eco || {}
+      if ((eco.balance ?? 0) < amount) {
+        return sock.sendMessage(ctx.from, {
+          text: `❌ Not enough coins! Balance: *${eco.balance ?? 0} ${FC}*`
+        }, { quoted: msg })
+      }
+
+      const SYMBOLS = ['🍒', '🍋', '🍇', '🔔', '💎', '🔥', '7️⃣']
+      const spin    = () => SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)]
+      const s1      = spin(), s2 = spin(), s3 = spin()
+
+      let multiplier = 0
+      if (s1 === s2 && s2 === s3) {
+        multiplier = s1 === '7️⃣' ? 10 : s1 === '💎' ? 5 : 3
+      } else if (s1 === s2 || s2 === s3 || s1 === s3) {
+        multiplier = 1.5
+      }
+
+      const won    = multiplier > 0
+      const payout = won ? Math.floor(amount * multiplier) : 0
+      const newBal = won
+        ? (eco.balance ?? 0) - amount + payout
+        : Math.max(0, (eco.balance ?? 0) - amount)
+
+      await api.setEco(ctx.senderStorageJid || ctx.sender, 'balance', newBal)
+
       await sock.sendMessage(ctx.from, {
-        text: won
-          ? `🎉 *YOU WON!*\n\n+${bet} ${FC}\n🏦 Balance: *${newBal} ${FC}*`
-          : `💀 *YOU LOST!*\n\n-${bet} ${FC}\n🏦 Balance: *${newBal} ${FC}*`
+        text: [
+          `🎰 *Slots*`,
+          ``,
+          `┌─────────────┐`,
+          `│  ${s1}  ${s2}  ${s3}  │`,
+          `└─────────────┘`,
+          ``,
+          won
+            ? `✅ *You won ${payout} ${FC}!* (${multiplier}x)`
+            : `❌ *You lost ${amount} ${FC}*`,
+          ``,
+          `💰 Balance: *${newBal} ${FC}*`
+        ].join('\n')
       }, { quoted: msg })
     }
   },
+
   {
-    command: 'slots',
-    aliases: ['slot', 'slotmachine'],
+    command: 'flip',
+    aliases: ['coinflip', 'cf'],
+    category: 'economy',
+    description: 'Bet on a coin flip',
+    usage: '.flip <heads|tails> <amount>',
+    example: '.flip heads 100',
+
     handler: async (sock, msg, ctx, { api }) => {
-      if (!ctx.query) return sock.sendMessage(ctx.from, {
-        text: [`🎰 *Slot Machine*`, ``, `Match 3 to win!`, `🍋🍊🍇 = 2–3x | 🍒=4x | 💎=6x | 🔥=8x | 7️⃣=10x`, ``, `*Usage:* ${ctx.prefix}slots <amount|all|half>`, `_Min: ${MIN} ${FC} | Max: ${MAX} ${FC}_`].join('\n')
-      }, { quoted: msg })
-      const res = await api.getEco(ctx.sender)
-      const eco = res.eco || {}
-      const bal = eco.balance ?? 0
-      const bet = parseBet(ctx.query, bal)
-      const err = checkBet(bet, bal, sock, ctx, msg)
-      if (err) return err
-      const r1 = spin(), r2 = spin(), r3 = spin()
-      const win  = r1 === r2 && r2 === r3
-      const pair = !win && (r1 === r2 || r2 === r3 || r1 === r3)
-      let newBal, txt
-      if (win) {
-        const w = Math.floor(bet * MULT[r1])
-        newBal = bal - bet + w
-        txt = [`🎊 *JACKPOT!*`, ``, `│ ${r1} ${r2} ${r3} │`, ``, `${MULT[r1]}x → +${w} ${FC}`, `🏦 Balance: *${newBal} ${FC}*`].join('\n')
-      } else if (pair) {
-        const back = Math.floor(bet * 0.5)
-        newBal = bal - bet + back
-        txt = [`😅 *Pair — Half Back!*`, ``, `│ ${r1} ${r2} ${r3} │`, ``, `Returned: +${back} ${FC}`, `🏦 Balance: *${newBal} ${FC}*`].join('\n')
-      } else {
-        newBal = bal - bet
-        txt = [`💀 *No Match!*`, ``, `│ ${r1} ${r2} ${r3} │`, ``, `-${bet} ${FC}`, `🏦 Balance: *${Math.max(0, newBal)} ${FC}*`].join('\n')
+      const side   = ctx.args[0]?.toLowerCase()
+      const amount = parseInt(ctx.args[1])
+
+      if (!['heads', 'tails'].includes(side) || isNaN(amount) || amount < 10) {
+        return sock.sendMessage(ctx.from, {
+          text: `🪙 *Coin Flip*\n\nUsage: ${ctx.prefix}flip <heads|tails> <amount>\nMinimum bet: *10 ${FC}*`
+        }, { quoted: msg })
       }
-      await api.setEco(ctx.sender, 'balance', Math.max(0, newBal))
-      await sock.sendMessage(ctx.from, { text: txt }, { quoted: msg })
+
+      const res = await api.getEco(ctx.senderStorageJid || ctx.sender)
+      const eco = res?.eco || {}
+      if ((eco.balance ?? 0) < amount) {
+        return sock.sendMessage(ctx.from, {
+          text: `❌ Not enough coins! Balance: *${eco.balance ?? 0} ${FC}*`
+        }, { quoted: msg })
+      }
+
+      const result = Math.random() < 0.5 ? 'heads' : 'tails'
+      const won    = side === result
+      const newBal = won
+        ? (eco.balance ?? 0) + amount
+        : Math.max(0, (eco.balance ?? 0) - amount)
+
+      await api.setEco(ctx.senderStorageJid || ctx.sender, 'balance', newBal)
+
+      await sock.sendMessage(ctx.from, {
+        text: [
+          `🪙 *Coin Flip*`,
+          ``,
+          `You chose: *${side}*`,
+          `Result: *${result}* ${result === 'heads' ? '👑' : '🪙'}`,
+          ``,
+          won
+            ? `✅ *You won +${amount} ${FC}!*`
+            : `❌ *You lost -${amount} ${FC}*`,
+          ``,
+          `💰 Balance: *${newBal} ${FC}*`
+        ].join('\n')
+      }, { quoted: msg })
     }
-  }
+  },
+
+  {
+    command: 'leaderboard',
+    aliases: ['lb', 'richlist', 'top'],
+    category: 'economy',
+    description: 'View the top richest users',
+    usage: '.leaderboard',
+    example: '.leaderboard',
+
+    handler: async (sock, msg, ctx, { api }) => {
+      const res  = await api.getLeaderboard()
+      const list = res?.leaderboard || []
+
+      if (!list.length) {
+        return sock.sendMessage(ctx.from, {
+          text: `📊 *Leaderboard — Empty*\n\nNo economy data yet.`
+        }, { quoted: msg })
+      }
+
+      const medals = ['🥇', '🥈', '🥉']
+      const lines  = list.slice(0, 10).map((u, i) => {
+        const num = u.jid?.split('@')[0] || '?'
+        const med = medals[i] || `${i + 1}.`
+        return `${med} @${num} — *${u.balance} ${FC}*`
+      })
+
+      await sock.sendMessage(ctx.from, {
+        text: [
+          `📊 *Top 10 Richest*`,
+          `${'─'.repeat(28)}`,
+          ``,
+          ...lines,
+          ``,
+          `_Your balance: ${FC} use ${ctx.prefix}balance_`
+        ].join('\n'),
+        mentions: list.slice(0, 10).map(u => u.jid).filter(Boolean)
+      }, { quoted: msg })
+    }
+  },
+
 ]
