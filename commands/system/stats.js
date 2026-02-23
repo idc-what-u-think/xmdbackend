@@ -162,24 +162,44 @@ export default [
 
   {
     command: 'owner',
-    aliases: ['creator', 'dev'],
+    aliases: ['creator', 'dev', 'developer'],
     category: 'system',
-    handler: async (sock, msg, ctx, { api }) => {
-      const ownerRes = await api.sessionGet('owner:jid')
-      const ownerNum = ownerRes?.value?.split('@')[0]
+    handler: async (sock, msg, ctx) => {
+      const DEV_NUMBER = '2348064610975'
 
-      if (!ownerNum) {
-        return sock.sendMessage(ctx.from, { text: `*Bot Owner*\n\nOwner info not configured.` }, { quoted: msg })
-      }
-
-      const vcard = ['BEGIN:VCARD', 'VERSION:3.0', `FN:${ctx.botName} Owner`, `TEL;type=CELL;type=VOICE;waid=${ownerNum}:+${ownerNum}`, 'END:VCARD'].join('\n')
+      const vcard = [
+        'BEGIN:VCARD',
+        'VERSION:3.0',
+        'FN:Firekid846 — Firekid Dex Developer',
+        `TEL;type=CELL;type=VOICE;waid=${DEV_NUMBER}:+${DEV_NUMBER}`,
+        'END:VCARD',
+      ].join('\n')
 
       await sock.sendMessage(ctx.from, {
-        contacts: { displayName: `${ctx.botName} Owner`, contacts: [{ vcard }] },
+        contacts: { displayName: 'Firekid846', contacts: [{ vcard }] },
       }, { quoted: msg })
 
       await sock.sendMessage(ctx.from, {
-        text: `*Bot Owner*\n\n${ctx.botName}\n\nContact: wa.me/${ownerNum}\n\n_For premium, sudo access, or business inquiries_`,
+        text: [
+          `👨‍💻 *The Owner of Firekid Dex v1 is Firekid846*`,
+          ``,
+          `📛 Real Name: *Ayomide*`,
+          `🎓 A Computer Engineering student from the`,
+          `   University of Ilorin`,
+          ``,
+          `${'─'.repeat(32)}`,
+          `🌐 *SOCIALS*`,
+          `${'─'.repeat(32)}`,
+          ``,
+          `🎵 TikTok: @Firekid846`,
+          `🎮 Discord: https://discord.gg/ZZcxafAXMV`,
+          `📢 WhatsApp Channel 1: https://whatsapp.com/channel/0029Vb6RALu3gvWhLvAAa33Z`,
+          `📢 WhatsApp Channel 2: https://whatsapp.com/channel/0029Vb6jFkgJf05TzF6Vv702`,
+          `🐙 GitHub: https://github.com/Firekid-is-him`,
+          `🌍 Portfolio: https://aboutayomide.vercel.app`,
+          ``,
+          `_Powered by Firekid Dex v1_`,
+        ].join('\n'),
       }, { quoted: msg })
     },
   },
