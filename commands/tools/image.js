@@ -338,92 +338,235 @@ export default [
       if (!query) {
         return sock.sendMessage(ctx.from, {
           text: [
-            `❌ Provide amount and optionally a receiver name.`,
-            `📌 *Usage:* ${ctx.prefix}opay <amount> | <receiver>`,
+            `❌ Provide all required fields separated by *|*`,
             ``,
-            `*Example:* ${ctx.prefix}opay 5000 | John Doe`
+            `📌 *Usage:*`,
+            `${ctx.prefix}opay <amount> | <receiver name> | <receiver bank> | <receiver account> | <sender name> | <sender bank>`,
+            ``,
+            `*Example:*`,
+            `${ctx.prefix}opay 1650 | JAYWONULTIMATE ENTERPRISES | MONIE POINT | 8253381685 | RAMAT OYINLOLA YAHAYA | OPay`
           ].join('\n')
         }, { quoted: msg })
       }
-      const parts = query.split('|')
-      const amountRaw = parts[0].trim().replace(/[^0-9.]/g, '')
-      const receiver = parts[1]?.trim() || 'Recipient'
+
+      const parts = query.split('|').map(s => s.trim())
+      const amountRaw   = parts[0]?.replace(/[^0-9.]/g, '') || ''
+      const receiverName  = parts[1] || 'RECIPIENT NAME'
+      const receiverBank  = parts[2] || 'BANK NAME'
+      const receiverAcct  = parts[3] || '0000000000'
+      const senderName    = parts[4] || 'SENDER NAME'
+      const senderBank    = parts[5] || 'OPay'
       const amount = parseFloat(amountRaw)
+
       if (isNaN(amount) || amount <= 0) {
-        return sock.sendMessage(ctx.from, { text: `❌ Provide a valid amount.\n*Example:* ${ctx.prefix}opay 5000` }, { quoted: msg })
+        return sock.sendMessage(ctx.from, {
+          text: `❌ Provide a valid amount.\n*Example:* ${ctx.prefix}opay 1650 | John Doe | GTBank | 0123456789 | Jane Doe | OPay`
+        }, { quoted: msg })
       }
+
+      // Mask sender account like OPay does: 916****564
+      const senderPhone = (ctx.senderNumber || '08000000000').replace(/\D/g, '')
+      const maskedSender = senderPhone.length >= 7
+        ? senderPhone.slice(0, 3) + '****' + senderPhone.slice(-3)
+        : senderPhone
+
       const placeholder = await sock.sendMessage(ctx.from, { text: '💚 Generating OPay receipt...' }, { quoted: msg })
       const outPath = tmp('png')
+
       try {
         const { createCanvas } = await loadCanvasModule()
-        const W = 420
-        const H = 580
+
+        // ── Dimensions ────────────────────────────────────────────────
+        const W  = 460
+        const H  = 720
+        const PAD = 22
+        const BORDER = 10  // dotted border inset
+
         const canvas = createCanvas(W, H)
         const c = canvas.getContext('2d')
+
+        // ── Background ────────────────────────────────────────────────
         c.fillStyle = '#ffffff'
         c.fillRect(0, 0, W, H)
+
+        // ── Dotted border ─────────────────────────────────────────────
+        c.strokeStyle = '#cccccc'
+        c.lineWidth = 2
+        c.setLineDash([6, 5])
+        c.strokeRect(BORDER, BORDER, W - BORDER * 2, H - BORDER * 2)
+        c.setLineDash([])
+
+        // ── Firekid watermark top-left ────────────────────────────────
+        c.fillStyle = 'rgba(0,0,0,0.13)'
+        c.font = 'bold 13px sans-serif'
+        c.textAlign = 'left'
+        c.fillText('Firekid', BORDER + 8, BORDER + 18)
+
+        // ── OPay logo area (top bar) ───────────────────────────────────
+        // Green circle logo placeholder
         c.fillStyle = '#0ba259'
-        c.fillRect(0, 0, W, 100)
+        c.beginPath()
+        c.arc(PAD + 22, 58, 20, 0, Math.PI * 2)
+        c.fill()
+        // White dash inside circle (OPay logo "-O")
         c.fillStyle = '#ffffff'
-        c.font = 'bold 28px sans-serif'
+        c.font = 'bold 20px sans-serif'
         c.textAlign = 'center'
-        c.fillText('OPay', W / 2, 45)
-        c.fillStyle = 'rgba(255,255,255,0.8)'
-        c.font = '14px sans-serif'
-        c.fillText('Payment Successful ✓', W / 2, 75)
+        c.fillText('-O', PAD + 22, 65)
+
+        // OPay text next to logo
         c.fillStyle = '#0ba259'
-        c.font = 'bold 38px sans-serif'
+        c.font = 'bold 22px sans-serif'
+        c.textAlign = 'left'
+        c.fillText('OPay', PAD + 50, 65)
+
+        // "Transaction Receipt" on the right
+        c.fillStyle = '#333333'
+        c.font = '14px sans-serif'
+        c.textAlign = 'right'
+        c.fillText('Transaction Receipt', W - PAD, 65)
+
+        // ── Divider ────────────────────────────────────────────────────
+        c.strokeStyle = '#e8e8e8'
+        c.lineWidth = 1
+        c.beginPath()
+        c.moveTo(PAD, 90)
+        c.lineTo(W - PAD, 90)
+        c.stroke()
+
+        // ── Amount ─────────────────────────────────────────────────────
+        c.fillStyle = '#0ba259'
+        c.font = 'bold 42px sans-serif'
         c.textAlign = 'center'
-        c.fillText(`₦${amount.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`, W / 2, 165)
+        c.fillText(`₦${amount.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`, W / 2, 148)
+
+        // "Successful"
+        c.fillStyle = '#111111'
+        c.font = 'bold 20px sans-serif'
+        c.textAlign = 'center'
+        c.fillText('Successful', W / 2, 178)
+
+        // Date/time — format like "Feb 17th, 2026 18:24:45"
+        const now = new Date()
+        const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+        const day = now.getDate()
+        const suffix = day === 1||day===21||day===31 ? 'st' : day===2||day===22 ? 'nd' : day===3||day===23 ? 'rd' : 'th'
+        const hh = String(now.getHours()).padStart(2,'0')
+        const mm = String(now.getMinutes()).padStart(2,'0')
+        const ss = String(now.getSeconds()).padStart(2,'0')
+        const dateStr = `${months[now.getMonth()]} ${day}${suffix}, ${now.getFullYear()} ${hh}:${mm}:${ss}`
+
         c.fillStyle = '#888888'
         c.font = '13px sans-serif'
-        c.fillText('Amount Transferred', W / 2, 185)
-        c.strokeStyle = '#f0f0f0'
+        c.textAlign = 'center'
+        c.fillText(dateStr, W / 2, 200)
+
+        // ── Divider ────────────────────────────────────────────────────
+        c.strokeStyle = '#e8e8e8'
         c.lineWidth = 1
-        c.setLineDash([6, 4])
         c.beginPath()
-        c.moveTo(20, 205)
-        c.lineTo(W - 20, 205)
+        c.moveTo(PAD, 220)
+        c.lineTo(W - PAD, 220)
         c.stroke()
-        c.setLineDash([])
-        const now = new Date()
-        const txnId = 'OPY' + Date.now().toString().slice(-10)
-        const rows = [
-          ['Sender',     ctx.senderNumber || '080XXXXXXXX'],
-          ['Receiver',   receiver],
-          ['Bank',       'Opay Digital Services'],
-          ['Date',       now.toLocaleDateString('en-NG')],
-          ['Time',       now.toLocaleTimeString('en-NG')],
-          ['Txn ID',     txnId],
-          ['Status',     '✅ Successful'],
-          ['Narration',  'Transfer']
-        ]
-        rows.forEach(([label, value], i) => {
-          const y = 235 + i * 38
+
+        // ── Helper: draw a detail section ─────────────────────────────
+        const drawSection = (title, nameLine, bankLine, yStart) => {
+          // Section title
+          c.fillStyle = '#444444'
+          c.font = 'bold 13px sans-serif'
+          c.textAlign = 'left'
+          c.fillText(title, PAD, yStart)
+
+          // Name (bold, uppercase)
+          c.fillStyle = '#111111'
+          c.font = 'bold 15px sans-serif'
+          c.fillText(nameLine.toUpperCase(), PAD, yStart + 22)
+
+          // Bank | Account (grey)
+          c.fillStyle = '#666666'
+          c.font = '13px sans-serif'
+          c.fillText(bankLine, PAD, yStart + 40)
+
+          return yStart + 60
+        }
+
+        // ── Recipient Details ──────────────────────────────────────────
+        let y = drawSection(
+          'Recipient Details',
+          receiverName,
+          `${receiverBank.toUpperCase()} | ${receiverAcct}`,
+          238
+        )
+
+        // Divider
+        c.strokeStyle = '#e8e8e8'
+        c.lineWidth = 1
+        c.beginPath()
+        c.moveTo(PAD, y + 8)
+        c.lineTo(W - PAD, y + 8)
+        c.stroke()
+        y += 28
+
+        // ── Sender Details ─────────────────────────────────────────────
+        y = drawSection(
+          'Sender Details',
+          senderName,
+          `${senderBank.toUpperCase()} | ${maskedSender}`,
+          y
+        )
+
+        // Divider
+        c.strokeStyle = '#e8e8e8'
+        c.lineWidth = 1
+        c.beginPath()
+        c.moveTo(PAD, y + 8)
+        c.lineTo(W - PAD, y + 8)
+        c.stroke()
+        y += 28
+
+        // ── Transaction No. & Session ID ───────────────────────────────
+        const txnNo  = Array.from({ length: 24 }, () => Math.floor(Math.random() * 10)).join('')
+        const sessId = Array.from({ length: 32 }, () => Math.floor(Math.random() * 10)).join('')
+
+        const drawRow = (label, value, rowY) => {
           c.fillStyle = '#888888'
           c.font = '12px sans-serif'
           c.textAlign = 'left'
-          c.fillText(label, 24, y)
-          c.fillStyle = '#1a1a1a'
-          c.font = 'bold 13px sans-serif'
+          c.fillText(label, PAD, rowY)
+          c.fillStyle = '#111111'
+          c.font = '12px sans-serif'
           c.textAlign = 'right'
-          c.fillText(String(value), W - 24, y)
-          c.strokeStyle = '#f5f5f5'
+          c.fillText(value, W - PAD, rowY)
+          c.strokeStyle = '#f0f0f0'
           c.lineWidth = 1
           c.beginPath()
-          c.moveTo(24, y + 10)
-          c.lineTo(W - 24, y + 10)
+          c.moveTo(PAD, rowY + 8)
+          c.lineTo(W - PAD, rowY + 8)
           c.stroke()
-        })
-        c.fillStyle = 'rgba(11,162,89,0.2)'
-        c.font = 'bold 13px sans-serif'
-        c.textAlign = 'left'
-        c.fillText('FireKid', 14, H - 12)
+          return rowY + 28
+        }
+
+        y = drawRow('Transaction No.', txnNo, y)
+        y = drawRow('Session ID', sessId.slice(0, 22) + '...', y)
+
+        // ── Footer tagline ─────────────────────────────────────────────
+        c.fillStyle = '#aaaaaa'
+        c.font = '10px sans-serif'
+        c.textAlign = 'center'
+        c.fillText('Enjoy a better life with OPay. Get free transfers, withdrawals, bill', W / 2, H - 42)
+        c.fillText('payments, instant loans, and good annual interest on your savings.', W / 2, H - 28)
+        c.fillText('OPay is licensed by the CBN and insured by the NDIC.', W / 2, H - 14)
+
+        // ── Write & send ───────────────────────────────────────────────
         await writeFile(outPath, canvas.toBuffer('image/png'))
         const { readFile } = await import('fs/promises')
         const buf = await readFile(outPath)
         await sock.sendMessage(ctx.from, { delete: placeholder.key })
-        await sock.sendMessage(ctx.from, { image: buf, caption: `💚 OPay receipt — ₦${amount.toLocaleString()}` }, { quoted: msg })
+        await sock.sendMessage(ctx.from, {
+          image:   buf,
+          caption: `💚 *OPay Transaction Receipt*\n₦${amount.toLocaleString('en-NG', { minimumFractionDigits: 2 })} • ${dateStr}`
+        }, { quoted: msg })
+
       } catch (err) {
         await sock.sendMessage(ctx.from, { edit: placeholder.key, text: `❌ ${err.message}` })
       } finally {
