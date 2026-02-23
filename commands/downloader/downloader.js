@@ -38,12 +38,14 @@ let _cobaltCacheTs        = 0
 const COBALT_CACHE_TTL    = 30 * 60 * 1000  // 30 min
 
 // Hardcoded fallback instances (no turnstile, no api key required)
-// Updated Feb 2026 from instances.cobalt.best opt-in list
+// Updated Feb 2026 — verified working from instances.cobalt.best
 const COBALT_FALLBACK = [
-  'https://cobalt-api.kwiatekmiki.com',
-  'https://cobalt.synzr.space',
-  'https://capi.oak.li',
   'https://cobalt.api.lostdusty.workers.dev',
+  'https://cobalt.nadeko.net',
+  'https://co.wuk.sh',
+  'https://cobalt.ggtyler.dev',
+  'https://cobalt-api.hyper.lol',
+  'https://cobalt.private.coffee',
 ]
 
 // Fetch live list and return up to 6 no-auth online instances
@@ -219,7 +221,29 @@ async function pinterestMedia(url) {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// YOUTUBE — free search (scrape YouTube results page for first video ID)
+// TIKWM — free no-auth TikTok downloader (no watermark)
+// https://www.tikwm.com — no API key needed, stable 2026
+// ─────────────────────────────────────────────────────────────────────
+async function tikwm(url) {
+  const res = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(url)}&hd=1`, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/121 Safari/537.36',
+      'Accept':     'application/json',
+    },
+    signal: AbortSignal.timeout(20_000),
+  })
+  if (!res.ok) throw new Error(`TikWM returned ${res.status}`)
+  const data = await res.json()
+  if (data.code !== 0) throw new Error(data.msg || 'TikWM failed')
+  const d = data.data
+  const mediaUrl = d.hdplay || d.play
+  if (!mediaUrl) throw new Error('TikWM: no video URL in response')
+  return {
+    mediaUrl,
+    title:  d.title || 'TikTok Video',
+    author: d.author?.nickname || '',
+  }
+}
 // ─────────────────────────────────────────────────────────────────────
 
 async function youtubeSearch(query) {
@@ -524,6 +548,18 @@ export default [
         }
 
         if (!buf) {
+          // Free Method 1: TikWM (no auth, no watermark, most reliable 2026)
+          try {
+            await editPlaceholder(sock, ph, '🎵 Downloading TikTok (no watermark)...')
+            const tt = await tikwm(url)
+            buf      = await toBuffer(tt.mediaUrl, 'video')
+            caption  = `🎵 *${tt.title}*${tt.author ? '\n👤 @' + tt.author : ''}\n_No watermark — Firekid XMD_`
+          } catch { /* fall through to cobalt */ }
+        }
+
+        // Free Method 2: cobalt fallback
+        if (!buf) {
+          await editPlaceholder(sock, ph, '🎵 Trying alternative method...')
           const result = await cobalt(url, { downloadMode: 'auto', videoQuality: '720' })
           buf     = await toBuffer(result.mediaUrl, 'video')
           caption = `🎵 *TikTok Video*\n_No watermark — Firekid XMD_`
