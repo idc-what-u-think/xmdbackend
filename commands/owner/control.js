@@ -100,7 +100,7 @@ export default [
           text: [
             `⚠️ *This will clear all bot settings.*`,
             ``,
-            `This includes: sudo list, premium list, block list, ban list, API keys, bot mode, and all settings.`,
+            `This includes: sudo list, premium list, block list, ban list, bot mode, and all settings.`,
             ``,
             `To confirm, type: \`${ctx.prefix}cleardata confirm\``
           ].join('\n')
@@ -109,9 +109,6 @@ export default [
 
       try {
         const knownKeys = ['sudo_list', 'premium_list', 'block_list', 'ban_list', 'bot:mode', 'owner:jid', 'support:link']
-        const keyTypes = ['groq', 'gemini', 'openrouter', 'openai', 'deepseek']
-        for (const t of keyTypes) knownKeys.push(`apikeys_${t}`)
-
         for (const key of knownKeys) {
           try { await api.sessionDelete(key) } catch {}
         }
@@ -174,11 +171,9 @@ export default [
       if (!ctx.query) {
         return sock.sendMessage(ctx.from, { text: `❌ Provide a bio text.\n📌 *Usage:* ${ctx.prefix}setbio <text>` }, { quoted: msg })
       }
-
       if (ctx.query.length > 139) {
         return sock.sendMessage(ctx.from, { text: `❌ Bio must be 139 characters or less. Yours: ${ctx.query.length}` }, { quoted: msg })
       }
-
       try {
         await sock.updateProfileStatus(ctx.query)
         await sock.sendMessage(ctx.from, { text: [`✅ *Bot bio updated!*`, ``, `📝 New bio:`, `_"${ctx.query}"_`].join('\n') }, { quoted: msg })
@@ -205,132 +200,29 @@ export default [
     }
   },
 
-  {
-    command: 'addapikey',
-    aliases: ['setapikey', 'apikeyadd'],
-    category: 'owner',
-    sudoOnly: true,
-    handler: async (sock, msg, ctx, { api }) => {
-      const VALID_TYPES = ['groq', 'gemini', 'openrouter', 'openai', 'deepseek']
-
-      if (!ctx.args[0] || !ctx.args[1]) {
-        return sock.sendMessage(ctx.from, {
-          text: [`🔑 *Add API Key*`, ``, `*Usage:* ${ctx.prefix}addapikey <type> <key>`, ``, `*Supported types:* ${VALID_TYPES.join(', ')}`, ``, `*Example:* ${ctx.prefix}addapikey groq gsk_xxx`].join('\n')
-        }, { quoted: msg })
-      }
-
-      const keyType = ctx.args[0].toLowerCase()
-      const keyVal = ctx.args[1]
-
-      if (!VALID_TYPES.includes(keyType)) {
-        return sock.sendMessage(ctx.from, { text: `❌ Invalid key type. Supported: ${VALID_TYPES.join(', ')}` }, { quoted: msg })
-      }
-
-      const res = await api.sessionGet(`apikeys_${keyType}`)
-      const keyList = res?.value ? JSON.parse(res.value) : []
-
-      if (keyList.includes(keyVal)) {
-        return sock.sendMessage(ctx.from, { text: `⚠️ This key is already added for ${keyType}.` }, { quoted: msg })
-      }
-
-      keyList.push(keyVal)
-      await api.sessionSet(`apikeys_${keyType}`, JSON.stringify(keyList))
-
-      await sock.sendMessage(ctx.from, {
-        text: [`✅ *API Key Added*`, ``, `🔑 Type:  *${keyType.toUpperCase()}*`, `🔢 Keys:  *${keyList.length}* total`, ``, `_Key: ${keyVal.slice(0, 8)}...${keyVal.slice(-4)}_`].join('\n')
-      }, { quoted: msg })
-    }
-  },
-
-  {
-    command: 'removeapikey',
-    aliases: ['delapikey', 'rmapikey'],
-    category: 'owner',
-    sudoOnly: true,
-    handler: async (sock, msg, ctx, { api }) => {
-      if (!ctx.args[0] || !ctx.args[1]) {
-        return sock.sendMessage(ctx.from, { text: `❌ Usage: ${ctx.prefix}removeapikey <type> <key>` }, { quoted: msg })
-      }
-
-      const keyType = ctx.args[0].toLowerCase()
-      const keyVal = ctx.args[1]
-
-      const res = await api.sessionGet(`apikeys_${keyType}`)
-      const keyList = res?.value ? JSON.parse(res.value) : []
-
-      if (!keyList.includes(keyVal)) {
-        return sock.sendMessage(ctx.from, { text: `❌ Key not found for ${keyType}.` }, { quoted: msg })
-      }
-
-      const updated = keyList.filter(k => k !== keyVal)
-      await api.sessionSet(`apikeys_${keyType}`, JSON.stringify(updated))
-
-      await sock.sendMessage(ctx.from, {
-        text: [`✅ *API Key Removed*`, ``, `🔑 Type: *${keyType.toUpperCase()}*`, `🔢 Remaining: *${updated.length}* key(s)`].join('\n')
-      }, { quoted: msg })
-    }
-  },
-
-  {
-    command: 'listapikeys',
-    aliases: ['apikeys', 'showkeys'],
-    category: 'owner',
-    sudoOnly: true,
-    handler: async (sock, msg, ctx, { api }) => {
-      const TYPES = ['groq', 'gemini', 'openrouter', 'openai', 'deepseek']
-      const lines = []
-
-      for (const t of TYPES) {
-        const res = await api.sessionGet(`apikeys_${t}`)
-        const keys = res?.value ? JSON.parse(res.value) : []
-        if (keys.length) {
-          lines.push(`🔑 *${t.toUpperCase()}* (${keys.length}):`)
-          keys.forEach((k, i) => lines.push(`  ${i + 1}. ${k.slice(0, 8)}...${k.slice(-4)}`))
-        } else {
-          lines.push(`🔑 *${t.toUpperCase()}*: _None_`)
-        }
-      }
-
-      await sock.sendMessage(ctx.from, {
-        text: [`🔑 *API Keys*`, `${'─'.repeat(26)}`, ``, ...lines, ``, `_Add with ${ctx.prefix}addapikey <type> <key>_`].join('\n')
-      }, { quoted: msg })
-    }
-  },
-
+  // ── report — routes to your admin dashboard via Worker ───────────────────
   {
     command: 'report',
     aliases: ['bug', 'feedback'],
-    category: 'owner',
+    category: 'system',
     handler: async (sock, msg, ctx, { api }) => {
       if (!ctx.query) {
         return sock.sendMessage(ctx.from, { text: `❌ Describe the issue.\n📌 *Usage:* ${ctx.prefix}report <message>` }, { quoted: msg })
       }
 
-      const ownerRes = await api.sessionGet('owner:jid')
-      const ownerJid = ownerRes?.value
-
-      if (!ownerJid) {
-        return sock.sendMessage(ctx.from, { text: `❌ Owner JID not configured. Contact the bot owner directly.` }, { quoted: msg })
-      }
+      const groupName = ctx.isGroup ? (ctx.groupMeta?.subject || ctx.from) : 'DM'
 
       try {
-        await sock.sendMessage(ownerJid, {
-          text: [
-            `🐛 *New Bug Report / Feedback*`,
-            `${'─'.repeat(30)}`,
-            ``,
-            `👤 From:  @${ctx.senderNumber}`,
-            `💬 Chat:  ${ctx.isGroup ? (ctx.groupMeta?.subject || ctx.from) : 'DM'}`,
-            `📅 Time:  ${new Date().toLocaleString()}`,
-            ``,
-            `📝 *Message:*`,
-            ctx.query
-          ].join('\n'),
-          mentions: [ctx.sender]
-        })
+        await api.sendReport(ctx.senderNumber, ctx.from, ctx.isGroup, groupName, ctx.query)
 
         await sock.sendMessage(ctx.from, {
-          text: [`✅ *Report Sent!*`, ``, `Your report has been forwarded to the bot owner.`, ``, `_"${ctx.query.slice(0, 60)}${ctx.query.length > 60 ? '...' : ''}"_`].join('\n')
+          text: [
+            `✅ *Report Sent!*`,
+            ``,
+            `Your report has been forwarded to the bot developer.`,
+            ``,
+            `_"${ctx.query.slice(0, 80)}${ctx.query.length > 80 ? '...' : ''}"_`
+          ].join('\n')
         }, { quoted: msg })
       } catch (err) {
         await sock.sendMessage(ctx.from, { text: `❌ Could not send report: ${err.message}` }, { quoted: msg })
@@ -371,5 +263,134 @@ export default [
         await sock.sendMessage(ctx.from, { edit: placeholder.key, text: `❌ Speed test failed: ${err.message}` })
       }
     }
-  }
+  },
+
+  // ── owner — hardcoded developer info ─────────────────────────────────────
+  {
+    command: 'owner',
+    aliases: ['creator', 'dev', 'developer'],
+    category: 'system',
+    handler: async (sock, msg, ctx, { api }) => {
+      const DEV_NUMBER = '2348064610975'
+
+      const vcard = [
+        'BEGIN:VCARD',
+        'VERSION:3.0',
+        'FN:FireKid846 — Firekid XMD Developer',
+        `TEL;type=CELL;type=VOICE;waid=${DEV_NUMBER}:+${DEV_NUMBER}`,
+        'END:VCARD'
+      ].join('\n')
+
+      await sock.sendMessage(ctx.from, {
+        contacts: { displayName: 'FireKid846', contacts: [{ vcard }] },
+      }, { quoted: msg })
+
+      await sock.sendMessage(ctx.from, {
+        text: [
+          `👨‍💻 *FireKid846*`,
+          `${'─'.repeat(30)}`,
+          ``,
+          `Built *Firekid XMD / Firekid Dex v1*`,
+          ``,
+          `*Real Name:* Ayomide`,
+          `*Field:*     Computer Engineering Student`,
+          ``,
+          `A developer available for hire or collabs.`,
+          `Hit my DM anytime 👇`,
+          ``,
+          `📱 *WhatsApp:* wa.me/${DEV_NUMBER}`,
+          `🐙 *GitHub:*   https://github.com/Firekid-is-him`,
+          `🌐 *Portfolio:* https://aboutayomide.vercel.app`,
+          `🔥 *Website:*  https://firekidofficial.name.ng`,
+          `🎵 *TikTok:*   tiktok.com/@Firekid846`,
+          `💬 *Discord:*  https://discord.gg/ZZcxafAXMV`,
+          ``,
+          `📢 *Channels:*`,
+          `  https://whatsapp.com/channel/0029Vb6RALu3gvWhLvAAa33Z`,
+          `  https://whatsapp.com/channel/0029Vb6jFkgJf05TzF6Vv702`,
+        ].join('\n')
+      }, { quoted: msg })
+    }
+  },
+
+  // ── support — hardcoded group link ───────────────────────────────────────
+  {
+    command: 'support',
+    aliases: ['helpgroup', 'community'],
+    category: 'system',
+    handler: async (sock, msg, ctx, { api }) => {
+      await sock.sendMessage(ctx.from, {
+        text: [
+          `🆘 *${ctx.botName} Support*`,
+          `${'─'.repeat(28)}`,
+          ``,
+          `Join the official support group for:`,
+          `  • Bug reports & feedback`,
+          `  • Feature requests`,
+          `  • General help`,
+          `  • Bot updates & news`,
+          ``,
+          `*👥 Support Group:*`,
+          `https://chat.whatsapp.com/HiZu3bsMQ2DAejOxBz1KgB?mode=gi_t`,
+          ``,
+          `*👨‍💻 Developer DM:*`,
+          `wa.me/2348064610975`,
+          ``,
+          `_Response time: usually within 24 hours_`,
+        ].join('\n')
+      }, { quoted: msg })
+    }
+  },
+
+  // ── about — bot info ──────────────────────────────────────────────────────
+  {
+    command: 'about',
+    aliases: ['botinfo', 'info'],
+    category: 'system',
+    handler: async (sock, msg, ctx, { api }) => {
+      await sock.sendMessage(ctx.from, {
+        text: [
+          `🔥 *About ${ctx.botName}*`,
+          `${'─'.repeat(30)}`,
+          ``,
+          `${ctx.botName} is a next-generation WhatsApp bot built by *FireKid846* — packed with 500+ commands across AI, group management, economy, anti-spam, media downloads, automation, games and more.`,
+          ``,
+          `Running on Baileys + Cloudflare Workers with a full dashboard. Pair your number, manage your bot, and unlock premium features all in one place.`,
+          ``,
+          `*🛠 Built With:*`,
+          `  Baileys (WhatsApp Web API)`,
+          `  Node.js ESM`,
+          `  Cloudflare Workers + D1 + KV`,
+          ``,
+          `*🌐 Dashboard:* https://firekidofficial.name.ng`,
+          `*📦 Repo:* https://github.com/Firekid-is-him/Firekid-Dex-V1`,
+          ``,
+          `_Type ${ctx.prefix}menu to explore all commands_`,
+        ].join('\n')
+      }, { quoted: msg })
+    }
+  },
+
+  // ── repo — bot source code ────────────────────────────────────────────────
+  {
+    command: 'repo',
+    aliases: ['source', 'github', 'code'],
+    category: 'system',
+    handler: async (sock, msg, ctx, { api }) => {
+      await sock.sendMessage(ctx.from, {
+        text: [
+          `📦 *${ctx.botName} Repository*`,
+          `${'─'.repeat(28)}`,
+          ``,
+          `Here is the bot repo:`,
+          ``,
+          `https://github.com/Firekid-is-him/Firekid-Dex-V1`,
+          ``,
+          `⭐ Star the repo if you like the bot!`,
+          `🐛 Found a bug? Use ${ctx.prefix}report <issue>`,
+        ].join('\n')
+      }, { quoted: msg })
+    }
+  },
+
 ]
