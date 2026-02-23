@@ -250,6 +250,25 @@ const startPairing = async (phone, pendingId, botMode, codeAlreadySent = false) 
 
       sessionFinalized = true
       console.log(`[Pair] Session finalized: ${sessionId} for ${userPhone}`)
+
+      // ── HEARTBEAT — keep session status fresh in D1 ────────────────────
+      // Without this, status stays 'active' forever and the next pair request
+      // for the same number will instantly appear as 'connected' in the dashboard.
+      const hbInterval = setInterval(async () => {
+        try {
+          await callWorker('/render/heartbeat', {
+            method: 'POST',
+            body: JSON.stringify({ sessionId, phone: userPhone, groups: 0, uptime: 0 }),
+          })
+        } catch {}
+      }, 60 * 1000) // every 60 seconds
+
+      // Fire one immediately so status flips to 'online' right away
+      callWorker('/render/heartbeat', {
+        method: 'POST',
+        body: JSON.stringify({ sessionId, phone: userPhone, groups: 0, uptime: 0 }),
+      }).catch(() => {})
+
       cleanup()
     }
 
