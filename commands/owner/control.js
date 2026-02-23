@@ -265,53 +265,6 @@ export default [
     }
   },
 
-  // ── owner — hardcoded developer info ─────────────────────────────────────
-  {
-    command: 'owner',
-    aliases: ['creator', 'dev', 'developer'],
-    category: 'system',
-    handler: async (sock, msg, ctx, { api }) => {
-      const DEV_NUMBER = '2348064610975'
-
-      const vcard = [
-        'BEGIN:VCARD',
-        'VERSION:3.0',
-        'FN:FireKid846 — Firekid XMD Developer',
-        `TEL;type=CELL;type=VOICE;waid=${DEV_NUMBER}:+${DEV_NUMBER}`,
-        'END:VCARD'
-      ].join('\n')
-
-      await sock.sendMessage(ctx.from, {
-        contacts: { displayName: 'FireKid846', contacts: [{ vcard }] },
-      }, { quoted: msg })
-
-      await sock.sendMessage(ctx.from, {
-        text: [
-          `👨‍💻 *FireKid846*`,
-          `${'─'.repeat(30)}`,
-          ``,
-          `Built *Firekid XMD / Firekid Dex v1*`,
-          ``,
-          `*Real Name:* Ayomide`,
-          `*Field:*     Computer Engineering Student`,
-          ``,
-          `A developer available for hire or collabs.`,
-          `Hit my DM anytime 👇`,
-          ``,
-          `📱 *WhatsApp:* wa.me/${DEV_NUMBER}`,
-          `🐙 *GitHub:*   https://github.com/Firekid-is-him`,
-          `🌐 *Portfolio:* https://aboutayomide.vercel.app`,
-          `🔥 *Website:*  https://firekidofficial.name.ng`,
-          `🎵 *TikTok:*   tiktok.com/@Firekid846`,
-          `💬 *Discord:*  https://discord.gg/ZZcxafAXMV`,
-          ``,
-          `📢 *Channels:*`,
-          `  https://whatsapp.com/channel/0029Vb6RALu3gvWhLvAAa33Z`,
-          `  https://whatsapp.com/channel/0029Vb6jFkgJf05TzF6Vv702`,
-        ].join('\n')
-      }, { quoted: msg })
-    }
-  },
 
   // ── support — hardcoded group link ───────────────────────────────────────
   {
