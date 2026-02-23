@@ -59,6 +59,7 @@ export default [
     }
   },
 
+  // ── ban — now writes plan: 'banned' to D1 ────────────────────────────────
   {
     command: 'ban',
     aliases: ['globalban', 'botban'],
@@ -69,13 +70,21 @@ export default [
       if (!targetJid) return sock.sendMessage(ctx.from, { text: `❌ Tag or reply to the user.\n📌 *Usage:* ${ctx.prefix}ban @user [reason]` }, { quoted: msg })
 
       const reason = ctx.args.filter(a => !a.startsWith('@')).join(' ').trim() || 'No reason given'
+      const normalised = targetJid.split('@')[0].replace(/\D/g, '') + '@s.whatsapp.net'
+
+      // Write banned plan to D1 — handler.js checks plan === 'banned'
+      const planRes = await api.setPlan(normalised, 'banned')
+      if (!planRes?.ok) {
+        return sock.sendMessage(ctx.from, { text: `❌ Failed to ban user. Worker error: ${planRes?.error || 'unknown'}` }, { quoted: msg })
+      }
+
+      // Also keep display list for banlist command
       const res = await api.sessionGet('ban_list')
       const banList = res?.value ? JSON.parse(res.value) : []
-      const alreadyBanned = banList.find(b => b.jid === targetJid)
-      if (alreadyBanned) return sock.sendMessage(ctx.from, { text: `⚠️ @${targetJid.split('@')[0]} is already banned.`, mentions: [targetJid] }, { quoted: msg })
-
-      banList.push({ jid: targetJid, reason, bannedAt: Date.now(), bannedBy: ctx.sender })
-      await api.sessionSet('ban_list', JSON.stringify(banList))
+      if (!banList.find(b => b.jid === normalised)) {
+        banList.push({ jid: normalised, reason, bannedAt: Date.now(), bannedBy: ctx.sender })
+        await api.sessionSet('ban_list', JSON.stringify(banList))
+      }
 
       try { await sock.sendMessage(targetJid, { text: `🚨 *You have been BANNED from the bot.*\n\nReason: _${reason}_\n\nContact the owner if you believe this is a mistake.` }) } catch {}
 
@@ -86,6 +95,7 @@ export default [
     }
   },
 
+  // ── unban — sets plan back to 'free' in D1 ───────────────────────────────
   {
     command: 'unban',
     aliases: ['globalunban'],
@@ -95,11 +105,16 @@ export default [
       const targetJid = ctx.mentionedJids[0] || ctx.quotedSender
       if (!targetJid) return sock.sendMessage(ctx.from, { text: `❌ Tag or reply to the user.\n📌 *Usage:* ${ctx.prefix}unban @user` }, { quoted: msg })
 
+      const normalised = targetJid.split('@')[0].replace(/\D/g, '') + '@s.whatsapp.net'
+
+      const planRes = await api.setPlan(normalised, 'free')
+      if (!planRes?.ok) {
+        return sock.sendMessage(ctx.from, { text: `❌ Failed to unban user. Worker error: ${planRes?.error || 'unknown'}` }, { quoted: msg })
+      }
+
       const res = await api.sessionGet('ban_list')
       const banList = res?.value ? JSON.parse(res.value) : []
-      if (!banList.find(b => b.jid === targetJid)) return sock.sendMessage(ctx.from, { text: `❌ @${targetJid.split('@')[0]} is not banned.`, mentions: [targetJid] }, { quoted: msg })
-
-      const updated = banList.filter(b => b.jid !== targetJid)
+      const updated = banList.filter(b => b.jid !== normalised)
       await api.sessionSet('ban_list', JSON.stringify(updated))
 
       try { await sock.sendMessage(targetJid, { text: `✅ Your ban has been lifted. You can use the bot again!` }) } catch {}
