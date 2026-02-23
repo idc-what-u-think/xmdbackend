@@ -1,676 +1,824 @@
-import { tmpdir } from 'os'
-import { join } from 'path'
-import { randomBytes } from 'crypto'
-import { readFile, unlink, access } from 'fs/promises'
+// ═══════════════════════════════════════════════════════════════════════
+// downloader.js — Firekid XMD
+// Free methods only (no yt-dlp, no auth), 2026 verified
+//
+// Architecture:
+//  • Cobalt OSS (community instances, no auth)  ← universal backbone
+//  • Pinterest Internal API (reversed-engineered, no auth)
+//  • YouTube HTML search (no auth)
+//  • Spotify oEmbed (no auth)
+//  • Google Drive direct link bypass
+//  • RapidAPI YouTube + TikTok for PREMIUM users (keys from worker)
+// ═══════════════════════════════════════════════════════════════════════
 
-const tmp = (ext) => join(tmpdir(), `fkd_${randomBytes(6).toString('hex')}.${ext}`)
-
-// ── yt-dlp runner ──────────────────────────────────────────
-const getYtDlp = async () => {
-  try {
-    const mod = await import('youtube-dl-exec')
-    return mod.default || mod
-  } catch {
-    throw new Error('youtube-dl-exec not installed. Run: npm install youtube-dl-exec')
-  }
-}
-
-// Download to a temp file and return buffer + clean up
-const dlToBuffer = async (url, ytdlpOpts, outExt) => {
-  const outPath = tmp(outExt)
-  const ytdlp  = await getYtDlp()
-
-  await ytdlp(url, {
-    output:     outPath,
-    noPlaylist: true,
-    noWarnings: true,
-    ...ytdlpOpts,
-  })
-
-  // yt-dlp may append extension automatically — try a few variants
-  const candidates = [
-    outPath,
-    outPath.replace(`.${outExt}`, `.mp3`),
-    outPath.replace(`.${outExt}`, `.mp4`),
-    outPath.replace(`.${outExt}`, `.m4a`),
-    outPath.replace(`.${outExt}`, `.webm`),
-  ]
-
-  for (const p of candidates) {
-    try {
-      await access(p)
-      const buf = await readFile(p)
-      await unlink(p).catch(() => {})
-      return buf
-    } catch {}
-  }
-
-  // fallback: glob-like — just try the original path
-  const buf = await readFile(outPath)
-  await unlink(outPath).catch(() => {})
-  return buf
-}
-
-// Get video/audio info without downloading
-const getInfo = async (url) => {
-  const ytdlp = await getYtDlp()
-  return ytdlp(url, {
-    dumpSingleJson: true,
-    noPlaylist:     true,
-    noWarnings:     true,
-  })
-}
-
-// ── Size guard — WhatsApp limits ───────────────────────────
-const MB = 1024 * 1024
+// ── Size limits (WhatsApp) ────────────────────────────────────────────
+const MB           = 1024 * 1024
 const MAX_AUDIO_MB = 16
 const MAX_VIDEO_MB = 64
 
-const checkSize = (buf, maxMB) => {
-  if (buf.length > maxMB * MB) {
-    throw new Error(`File too large (${(buf.length / MB).toFixed(1)}MB). Max is ${maxMB}MB.`)
-  }
+const checkSize = (buf, maxMB, label = 'File') => {
+  if (buf.length > maxMB * MB)
+    throw new Error(`${label} too large (${(buf.length / MB).toFixed(1)} MB). Max allowed: ${maxMB} MB.`)
 }
 
-// ── Spotify oEmbed — no auth needed ───────────────────────
-const spotifyTitle = async (url) => {
-  const res  = await fetch(`https://open.spotify.com/oembed?url=${encodeURIComponent(url)}`)
-  if (!res.ok) throw new Error('Could not fetch Spotify track info')
+// ─────────────────────────────────────────────────────────────────────
+// COBALT — universal free downloader
+// Supports: YouTube, TikTok, Instagram, Facebook, Twitter/X,
+//           Pinterest, Reddit, SoundCloud, Twitch clips, and more.
+//
+// Strategy: dynamically fetch the live instance list from
+//   https://instances.cobalt.best/api/instances.json
+// and pick the best no-auth online instance, with a hardcoded
+// fallback list if the instance registry is unreachable.
+// ─────────────────────────────────────────────────────────────────────
+
+// Cache so we only re-fetch instances once per process lifetime
+let _cobaltInstanceCache = null
+let _cobaltCacheTs        = 0
+const COBALT_CACHE_TTL    = 30 * 60 * 1000  // 30 min
+
+// Hardcoded fallback instances (no turnstile, no api key required)
+// Updated Feb 2026 from instances.cobalt.best opt-in list
+const COBALT_FALLBACK = [
+  'https://cobalt-api.kwiatekmiki.com',
+  'https://cobalt.synzr.space',
+  'https://capi.oak.li',
+  'https://cobalt.api.lostdusty.workers.dev',
+]
+
+// Fetch live list and return up to 6 no-auth online instances
+async function getCobaltInstances() {
+  const now = Date.now()
+  if (_cobaltInstanceCache && now - _cobaltCacheTs < COBALT_CACHE_TTL) {
+    return _cobaltInstanceCache
+  }
+
+  try {
+    const res = await fetch('https://instances.cobalt.best/api/instances.json', {
+      headers: { 'User-Agent': 'firekidxmd/1.0 (+https://github.com/firekid)' },
+      signal: AbortSignal.timeout(8_000),
+    })
+    if (!res.ok) throw new Error(`registry ${res.status}`)
+    const list = await res.json()
+
+    const good = list
+      .filter(i => i.online && i.info?.auth === false && i.api)
+      .sort((a, b) => (b.score || 0) - (a.score || 0))
+      .slice(0, 6)
+      .map(i => `https://${i.api}`)
+
+    if (good.length) {
+      _cobaltInstanceCache = good
+      _cobaltCacheTs       = now
+      return good
+    }
+  } catch { /* fall through */ }
+
+  return COBALT_FALLBACK
+}
+
+// POST to cobalt; tries all instances until one succeeds
+// Returns { mediaUrl, filename, type: 'audio'|'video'|'image' }
+async function cobalt(url, opts = {}) {
+  const instances = await getCobaltInstances()
+
+  const body = JSON.stringify({
+    url,
+    videoQuality:       opts.videoQuality   || '720',
+    audioFormat:        opts.audioFormat     || 'mp3',
+    audioBitrate:       opts.audioBitrate    || '128',
+    downloadMode:       opts.downloadMode    || 'auto',
+    youtubeVideoCodec:  'h264',
+    filenameStyle:      'basic',
+    disableMetadata:    true,
+    tiktokFullAudio:    false,
+    twitterGif:         false,
+    alwaysProxy:        true,   // get a proxied tunnel URL we can fetch
+  })
+
+  const errors = []
+
+  for (const base of instances) {
+    try {
+      const res = await fetch(`${base}/`, {
+        method: 'POST',
+        headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+        body,
+        signal: AbortSignal.timeout(25_000),
+      })
+
+      if (!res.ok) { errors.push(`${base}: HTTP ${res.status}`); continue }
+
+      const data = await res.json()
+
+      if (data.status === 'error') {
+        // If this instance wants auth, skip it silently
+        const code = data.error?.code || ''
+        if (code.includes('auth')) continue
+        errors.push(`${base}: ${code}`)
+        continue
+      }
+
+      // picker = multiple items (e.g. Instagram carousel) — take first video, else first item
+      if (data.status === 'picker') {
+        const videos = data.picker?.filter(p => p.type === 'video')
+        const item   = videos?.[0] || data.picker?.[0]
+        if (item?.url) return { mediaUrl: item.url, filename: `media.${item.type === 'video' ? 'mp4' : 'jpg'}`, type: item.type || 'video' }
+        continue
+      }
+
+      // tunnel or redirect
+      if ((data.status === 'tunnel' || data.status === 'redirect') && data.url) {
+        const fname = data.filename || 'media'
+        const type  = fname.match(/\.(mp3|ogg|wav|opus|flac)$/i) ? 'audio'
+                    : fname.match(/\.(jpg|jpeg|png|webp|gif)$/i)  ? 'image'
+                    : 'video'
+        return { mediaUrl: data.url, filename: fname, type }
+      }
+
+    } catch (e) { errors.push(`${base}: ${e.message}`) }
+  }
+
+  throw new Error(`All cobalt instances failed.\nErrors: ${errors.slice(0, 3).join(' | ')}`)
+}
+
+// Fetch a URL and return a Buffer
+async function toBuffer(url, label = 'media') {
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Firekid/1.0)' },
+    signal: AbortSignal.timeout(90_000),
+    redirect: 'follow',
+  })
+  if (!res.ok) throw new Error(`${label} server returned ${res.status}`)
+  return Buffer.from(await res.arrayBuffer())
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// PINTEREST — internal resource API (no auth, public pins)
+// Reversed-engineered from the Pinterest web frontend, stable 2024-2026
+// ─────────────────────────────────────────────────────────────────────
+
+function extractPinId(url) {
+  // Handles: /pin/123456/, pin.it/AbCdEf (short links resolve on fetch)
+  const m = url.match(/\/pin\/(\d+)/) || url.match(/pin\.it\/([A-Za-z0-9]+)/)
+  return m?.[1] || null
+}
+
+async function pinterestMedia(url) {
+  // Step 1: Resolve short links (pin.it) to full URL
+  let fullUrl = url
+  if (url.includes('pin.it')) {
+    const r = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(8_000) })
+    fullUrl  = r.url  // final URL after redirect
+  }
+
+  const pinId = extractPinId(fullUrl)
+  if (!pinId) throw new Error('Could not extract pin ID from URL.')
+
+  // Step 2: Hit Pinterest's internal resource API (no auth required for public pins)
+  const apiUrl = `https://www.pinterest.com/resource/PinResource/get/?data=${encodeURIComponent(JSON.stringify({
+    options: {
+      id: pinId,
+      field_set_key: 'detailed',
+    },
+    context: {},
+  }))}&source_url=/pin/${pinId}/`
+
+  const res = await fetch(apiUrl, {
+    headers: {
+      'User-Agent':       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/121 Safari/537.36',
+      'Accept':           'application/json, text/javascript, */*; q=0.01',
+      'Accept-Language':  'en-US,en;q=0.9',
+      'X-Requested-With': 'XMLHttpRequest',
+      'Referer':          `https://www.pinterest.com/pin/${pinId}/`,
+    },
+    signal: AbortSignal.timeout(12_000),
+  })
+
+  if (!res.ok) throw new Error(`Pinterest API returned ${res.status}`)
+
+  const json   = await res.json()
+  const pin    = json?.resource_response?.data
+
+  if (!pin) throw new Error('Pinterest returned empty pin data.')
+
+  // Check for video first
+  const videos = pin.videos?.video_list
+  if (videos) {
+    // Sort by quality descending: V_720P, V_480P, V_EXP7, V_EXP6, ...
+    const sorted = Object.values(videos).sort((a, b) => (parseInt(b.width) || 0) - (parseInt(a.width) || 0))
+    const best   = sorted.find(v => v.url && !v.url.includes('.m3u8')) || sorted[0]
+    if (best?.url) return { type: 'video', mediaUrl: best.url, title: pin.title || 'Pinterest Video' }
+  }
+
+  // Then image
+  const img = pin.images?.orig || pin.images?.['736x'] || pin.images?.['474x']
+  if (img?.url) return { type: 'image', mediaUrl: img.url, title: pin.title || 'Pinterest Image' }
+
+  throw new Error('No media found in this Pinterest pin.')
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// YOUTUBE — free search (scrape YouTube results page for first video ID)
+// ─────────────────────────────────────────────────────────────────────
+
+async function youtubeSearch(query) {
+  // YouTube's search page embeds a JSON blob in the page source
+  const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}&sp=EgIQAQ%3D%3D`
+  const res  = await fetch(url, {
+    headers: {
+      'User-Agent':      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/121 Safari/537.36',
+      'Accept-Language': 'en-US,en;q=0.9',
+    },
+    signal: AbortSignal.timeout(10_000),
+  })
+  const html  = await res.text()
+  const match = html.match(/"videoId"\s*:\s*"([A-Za-z0-9_-]{11})"/)
+  if (!match) throw new Error(`No YouTube results found for: ${query}`)
+  return match[1]
+}
+
+function extractYouTubeId(url) {
+  const m = url.match(/(?:v=|youtu\.be\/|shorts\/|embed\/|v%3D)([A-Za-z0-9_-]{11})/)
+  return m?.[1] || null
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// SPOTIFY oEmbed — get track title without any auth
+// ─────────────────────────────────────────────────────────────────────
+
+async function spotifyTitle(url) {
+  const res  = await fetch(`https://open.spotify.com/oembed?url=${encodeURIComponent(url)}`, {
+    signal: AbortSignal.timeout(8_000),
+  })
+  if (!res.ok) throw new Error('Could not fetch Spotify track info.')
   const data = await res.json()
-  // title is usually "Track Name - Artist Name"
   return data.title || null
 }
 
-// ── Pinterest scraper — no auth needed ────────────────────
-const scrapePinterest = async (url) => {
-  const res  = await fetch(url, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
-      'Accept-Language': 'en-US,en;q=0.9',
-    }
+// ─────────────────────────────────────────────────────────────────────
+// RAPIDAPI — Premium-only wrappers (keys fetched from worker)
+// ─────────────────────────────────────────────────────────────────────
+
+// YouTube via RapidAPI (yt-api.p.rapidapi.com)
+// Returns { mediaUrl, title, duration }
+async function rapidYouTube(videoId, apiKey, wantAudio) {
+  const host = 'yt-api.p.rapidapi.com'
+  const res  = await fetch(`https://${host}/dl?id=${videoId}`, {
+    headers: { 'X-RapidAPI-Key': apiKey, 'X-RapidAPI-Host': host },
+    signal: AbortSignal.timeout(20_000),
   })
-  const html = await res.text()
+  if (!res.ok) throw new Error(`RapidAPI YouTube: ${res.status}`)
+  const data = await res.json()
+  if (data.status !== 'OK') throw new Error(data.message || 'RapidAPI YouTube failed')
 
-  // Try to extract video URL first
-  const videoMatch = html.match(/"video_url"\s*:\s*"([^"]+)"/) ||
-                     html.match(/contentUrl["']?\s*:\s*["']([^"']+\.mp4[^"']*)/i)
-  if (videoMatch) return { type: 'video', url: videoMatch[1].replace(/\\u002F/g, '/').replace(/\\\//g, '/') }
+  const title    = data.title || 'YouTube Video'
+  const seconds  = data.lengthSeconds || 0
+  const duration = seconds ? `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` : ''
 
-  // Try high-res image
-  const imgMatch = html.match(/"orig"\s*:\s*\{[^}]*"url"\s*:\s*"([^"]+)"/) ||
-                   html.match(/property="og:image"\s+content="([^"]+)"/) ||
-                   html.match(/name="twitter:image:src"\s+content="([^"]+)"/)
-  if (imgMatch) return { type: 'image', url: imgMatch[1].replace(/\\u002F/g, '/').replace(/\\\//g, '/') }
+  if (wantAudio) {
+    const fmt = (data.adaptiveFormats || [])
+      .filter(f => f.mimeType?.startsWith('audio/') && f.url)
+      .sort((a, b) => (parseInt(b.bitrate) || 0) - (parseInt(a.bitrate) || 0))[0]
+    if (!fmt?.url) throw new Error('RapidAPI: no audio format found')
+    return { mediaUrl: fmt.url, title, duration }
+  }
 
-  throw new Error('Could not extract media from Pinterest pin.')
+  // Video: best mp4 at or under 720p
+  const fmt = (data.formats || [])
+    .filter(f => f.mimeType?.includes('video/mp4') && f.url)
+    .sort((a, b) => (parseInt(b.height) || 0) - (parseInt(a.height) || 0))
+    .find(f => (parseInt(f.height) || 0) <= 720)
+    || (data.formats || []).find(f => f.url)
+
+  if (!fmt?.url) throw new Error('RapidAPI: no video format found')
+  return { mediaUrl: fmt.url, title, duration }
 }
 
-// ── Google Drive URL converter ─────────────────────────────
-const gdriveDirectUrl = (url) => {
-  const match = url.match(/[-\w]{25,}(?!.*[-\w]{25,})/)
-  if (!match) throw new Error('Could not extract Google Drive file ID from URL.')
-  return `https://drive.google.com/uc?export=download&id=${match[0]}&confirm=t`
+// TikTok no-watermark HD via RapidAPI (tiktok-video-no-watermark2.p.rapidapi.com)
+async function rapidTikTok(url, apiKey) {
+  const host = 'tiktok-video-no-watermark2.p.rapidapi.com'
+  const res  = await fetch(`https://${host}/index?url=${encodeURIComponent(url)}&hd=1`, {
+    headers: { 'X-RapidAPI-Key': apiKey, 'X-RapidAPI-Host': host },
+    signal: AbortSignal.timeout(20_000),
+  })
+  if (!res.ok) throw new Error(`RapidAPI TikTok: ${res.status}`)
+  const data = await res.json()
+  if (data.code !== 0) throw new Error(data.msg || 'RapidAPI TikTok failed')
+  const d = data.data
+  return {
+    mediaUrl: d.hdplay || d.play,
+    title:    d.title || 'TikTok Video',
+    author:   d.author?.nickname || '',
+  }
 }
 
-// ═══════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────────────────────────────
+// GOOGLE DRIVE — direct link bypass (large file confirmation)
+// ─────────────────────────────────────────────────────────────────────
+
+function gdriveId(url) {
+  const m = url.match(/[-\w]{25,}(?!.*[-\w]{25,})/)
+  if (!m) throw new Error('Could not extract Google Drive file ID from URL.')
+  return m[0]
+}
+
+async function gdriveDownload(url) {
+  const fileId    = gdriveId(url)
+  const directUrl = `https://drive.google.com/uc?export=download&id=${fileId}&confirm=t`
+  const ua        = { 'User-Agent': 'Mozilla/5.0', redirect: 'follow' }
+
+  let res = await fetch(directUrl, { headers: ua, signal: AbortSignal.timeout(90_000) })
+  if (!res.ok) throw new Error(`Drive returned ${res.status}. Is the file public?`)
+
+  // Large file: Google shows a confirmation HTML page
+  const ct = res.headers.get('content-type') || ''
+  if (ct.includes('text/html')) {
+    const html    = await res.text()
+    const confirm = html.match(/confirm=([A-Za-z0-9_-]+)/)?.[1]
+    if (!confirm) throw new Error('Drive file may be too large or restricted.')
+    const newUrl = `https://drive.usercontent.google.com/download?id=${fileId}&export=download&authuser=0&confirm=${confirm}`
+    res = await fetch(newUrl, { headers: ua, signal: AbortSignal.timeout(90_000) })
+    if (!res.ok) throw new Error(`Drive download failed: ${res.status}`)
+  }
+
+  const buf   = Buffer.from(await res.arrayBuffer())
+  const cd    = res.headers.get('content-disposition') || ''
+  const fname = cd.match(/filename[^;=\n]*=([^;\n]*)/)?.[1]?.replace(/['"]/g, '').trim() || `gdrive_${fileId}`
+  const mime  = (res.headers.get('content-type') || 'application/octet-stream').split(';')[0].trim()
+  return { buf, fname, mime }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// SEND HELPERS
+// ─────────────────────────────────────────────────────────────────────
+
+const sendAudio = async (sock, msg, ctx, buf, caption) => {
+  checkSize(buf, MAX_AUDIO_MB, 'Audio')
+  return sock.sendMessage(ctx.from, { audio: buf, mimetype: 'audio/mpeg', ptt: false, caption }, { quoted: msg })
+}
+
+const sendVideo = async (sock, msg, ctx, buf, caption) => {
+  checkSize(buf, MAX_VIDEO_MB, 'Video')
+  return sock.sendMessage(ctx.from, { video: buf, mimetype: 'video/mp4', caption }, { quoted: msg })
+}
+
+const sendImage = async (sock, msg, ctx, buf, caption) => {
+  checkSize(buf, MAX_VIDEO_MB, 'Image')
+  return sock.sendMessage(ctx.from, { image: buf, caption }, { quoted: msg })
+}
+
+const placeholder = async (sock, ctx, msg, text) =>
+  sock.sendMessage(ctx.from, { text }, { quoted: msg })
+
+const editPlaceholder = async (sock, ph, text) => {
+  try { await sock.sendMessage(ph.key.remoteJid, { edit: ph.key, text }) } catch {}
+}
+
+const deletePlaceholder = async (sock, ph) => {
+  try { await sock.sendMessage(ph.key.remoteJid, { delete: ph.key }) } catch {}
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // COMMANDS
-// ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════
 
 export default [
 
-  // ── YouTube MP3 ────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────
+  // YouTube Audio (MP3)
+  // Free: YouTube search → cobalt tunnel → mp3
+  // Premium: RapidAPI (higher quality, more reliable)
+  // ─────────────────────────────────────────────────────────────────
   {
     command:  'ytmp3',
     aliases:  ['play', 'ymp3', 'youtubemp3', 'ytaudio'],
     category: 'downloader',
     handler:  async (sock, msg, ctx) => {
       const query = ctx.query?.trim()
-      if (!query) {
-        return sock.sendMessage(ctx.from, {
-          text: [
-            `❌ Provide a YouTube URL or search term.`,
-            `📌 *Usage:* ${ctx.prefix}ytmp3 <url or song name>`,
-            ``,
-            `*Examples:*`,
-            `${ctx.prefix}ytmp3 https://youtu.be/dQw4w9WgXcQ`,
-            `${ctx.prefix}ytmp3 Burna Boy Last Last`,
-          ].join('\n')
-        }, { quoted: msg })
-      }
-
-      const isUrl = query.startsWith('http')
-      const url   = isUrl ? query : `ytsearch1:${query}`
-
-      const placeholder = await sock.sendMessage(ctx.from, {
-        text: `🎵 Downloading audio... please wait`
+      if (!query) return sock.sendMessage(ctx.from, {
+        text: `❌ *Usage:* ${ctx.prefix}ytmp3 <YouTube URL or song name>\n\n*Examples:*\n${ctx.prefix}ytmp3 Burna Boy Last Last\n${ctx.prefix}ytmp3 https://youtu.be/dQw4w9WgXcQ`
       }, { quoted: msg })
 
+      const ph = await placeholder(sock, ctx, msg, '🎵 Fetching audio...')
+
       try {
-        // Get info first for caption
-        let title = query
-        let duration = ''
-        try {
-          const info = await getInfo(url)
-          title    = info.title || query
-          duration = info.duration ? `⏱️ ${Math.floor(info.duration / 60)}:${String(info.duration % 60).padStart(2, '0')}` : ''
-        } catch {}
+        const isUrl   = query.startsWith('http')
+        const videoId = isUrl ? extractYouTubeId(query) : await youtubeSearch(query)
+        if (!videoId) throw new Error('Could not find that YouTube video.')
 
-        const buf = await dlToBuffer(url, {
-          extractAudio:  true,
-          audioFormat:   'mp3',
-          audioQuality:  '128K',
-          format:        'bestaudio/best',
-        }, 'mp3')
+        const ytUrl = `https://www.youtube.com/watch?v=${videoId}`
+        let buf, caption
 
-        checkSize(buf, MAX_AUDIO_MB)
+        // Try premium RapidAPI first
+        if (ctx.isPremium) {
+          try {
+            const keyRes = await ctx.api?.getKey?.('youtube', ctx.senderNumber)
+            if (keyRes?.key) {
+              await editPlaceholder(sock, ph, '🎵 Fetching via premium service...')
+              const track = await rapidYouTube(videoId, keyRes.key, true)
+              buf     = await toBuffer(track.mediaUrl, 'audio')
+              caption = `🎵 *${track.title}*${track.duration ? '\n⏱️ ' + track.duration : ''}\n_Firekid XMD Premium_`
+            }
+          } catch { /* fall through to cobalt */ }
+        }
 
-        await sock.sendMessage(ctx.from, { delete: placeholder.key })
-        await sock.sendMessage(ctx.from, {
-          audio:    buf,
-          mimetype: 'audio/mpeg',
-          ptt:      false,
-          caption:  `🎵 *${title}*\n${duration}`.trim(),
-        }, { quoted: msg })
+        // Free: cobalt
+        if (!buf) {
+          await editPlaceholder(sock, ph, '🎵 Downloading audio...')
+          const result = await cobalt(ytUrl, { downloadMode: 'audio', audioFormat: 'mp3', audioBitrate: '128' })
+          buf     = await toBuffer(result.mediaUrl, 'audio')
+          caption = `🎵 *${query}*\n_Downloaded via Firekid XMD_`
+        }
+
+        await deletePlaceholder(sock, ph)
+        await sendAudio(sock, msg, ctx, buf, caption)
 
       } catch (err) {
-        await sock.sendMessage(ctx.from, {
-          edit: placeholder.key,
-          text: `❌ Download failed: ${err.message}`
-        })
+        await editPlaceholder(sock, ph, `❌ Download failed: ${err.message}`)
       }
-    }
+    },
   },
 
-  // ── YouTube MP4 ────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────
+  // YouTube Video (MP4)
+  // ─────────────────────────────────────────────────────────────────
   {
     command:  'ytmp4',
     aliases:  ['video', 'ymp4', 'ytv', 'youtubevideo'],
     category: 'downloader',
     handler:  async (sock, msg, ctx) => {
       const query = ctx.query?.trim()
-      if (!query) {
-        return sock.sendMessage(ctx.from, {
-          text: [
-            `❌ Provide a YouTube URL or search term.`,
-            `📌 *Usage:* ${ctx.prefix}ytmp4 <url or video name>`,
-            ``,
-            `*Examples:*`,
-            `${ctx.prefix}ytmp4 https://youtu.be/dQw4w9WgXcQ`,
-            `${ctx.prefix}ytmp4 Davido Unavailable`,
-          ].join('\n')
-        }, { quoted: msg })
-      }
-
-      const isUrl = query.startsWith('http')
-      const url   = isUrl ? query : `ytsearch1:${query}`
-
-      const placeholder = await sock.sendMessage(ctx.from, {
-        text: `🎬 Downloading video... please wait`
+      if (!query) return sock.sendMessage(ctx.from, {
+        text: `❌ *Usage:* ${ctx.prefix}ytmp4 <YouTube URL or video name>\n\n*Examples:*\n${ctx.prefix}ytmp4 Davido Unavailable\n${ctx.prefix}ytmp4 https://youtu.be/dQw4w9WgXcQ`
       }, { quoted: msg })
 
+      const ph = await placeholder(sock, ctx, msg, '🎬 Fetching video...')
+
       try {
-        let title = query
-        let duration = ''
-        try {
-          const info = await getInfo(url)
-          title    = info.title || query
-          duration = info.duration ? `⏱️ ${Math.floor(info.duration / 60)}:${String(info.duration % 60).padStart(2, '0')}` : ''
-        } catch {}
+        const isUrl   = query.startsWith('http')
+        const videoId = isUrl ? extractYouTubeId(query) : await youtubeSearch(query)
+        if (!videoId) throw new Error('Could not find that YouTube video.')
 
-        const buf = await dlToBuffer(url, {
-          format: 'best[height<=720][ext=mp4]/best[height<=720]/bestvideo[ext=mp4]+bestaudio/best',
-          mergeOutputFormat: 'mp4',
-        }, 'mp4')
+        const ytUrl = `https://www.youtube.com/watch?v=${videoId}`
+        let buf, caption
 
-        checkSize(buf, MAX_VIDEO_MB)
+        if (ctx.isPremium) {
+          try {
+            const keyRes = await ctx.api?.getKey?.('youtube', ctx.senderNumber)
+            if (keyRes?.key) {
+              await editPlaceholder(sock, ph, '🎬 Fetching via premium service...')
+              const track = await rapidYouTube(videoId, keyRes.key, false)
+              buf     = await toBuffer(track.mediaUrl, 'video')
+              caption = `🎬 *${track.title}*${track.duration ? '\n⏱️ ' + track.duration : ''}\n_Firekid XMD Premium_`
+            }
+          } catch { /* fall through to cobalt */ }
+        }
 
-        await sock.sendMessage(ctx.from, { delete: placeholder.key })
-        await sock.sendMessage(ctx.from, {
-          video:    buf,
-          mimetype: 'video/mp4',
-          caption:  `🎬 *${title}*\n${duration}`.trim(),
-        }, { quoted: msg })
+        if (!buf) {
+          await editPlaceholder(sock, ph, '🎬 Downloading video (720p)...')
+          const result = await cobalt(ytUrl, { downloadMode: 'auto', videoQuality: '720' })
+          buf     = await toBuffer(result.mediaUrl, 'video')
+          caption = `🎬 *${query}*\n_Downloaded via Firekid XMD_`
+        }
+
+        await deletePlaceholder(sock, ph)
+        await sendVideo(sock, msg, ctx, buf, caption)
 
       } catch (err) {
-        await sock.sendMessage(ctx.from, {
-          edit: placeholder.key,
-          text: `❌ Download failed: ${err.message}`
-        })
+        await editPlaceholder(sock, ph, `❌ Download failed: ${err.message}`)
       }
-    }
+    },
   },
 
-  // ── TikTok ─────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────
+  // TikTok — no watermark
+  // Free: cobalt (watermark-free)
+  // Premium: RapidAPI HD no-watermark
+  // ─────────────────────────────────────────────────────────────────
   {
     command:  'tt',
     aliases:  ['tiktok', 'ttdl', 'tiktokdl'],
     category: 'downloader',
     handler:  async (sock, msg, ctx) => {
       const url = ctx.query?.trim()
-      if (!url || !url.startsWith('http')) {
-        return sock.sendMessage(ctx.from, {
-          text: [
-            `❌ Provide a TikTok video URL.`,
-            `📌 *Usage:* ${ctx.prefix}tt <tiktok url>`,
-            ``,
-            `*Example:*`,
-            `${ctx.prefix}tt https://vm.tiktok.com/xxxxx`,
-          ].join('\n')
-        }, { quoted: msg })
-      }
-
-      const placeholder = await sock.sendMessage(ctx.from, {
-        text: `🎵 Downloading TikTok video (no watermark)...`
+      if (!url?.startsWith('http')) return sock.sendMessage(ctx.from, {
+        text: `❌ *Usage:* ${ctx.prefix}tt <TikTok URL>\n\n*Example:*\n${ctx.prefix}tt https://vm.tiktok.com/xxxxx`
       }, { quoted: msg })
 
+      const ph = await placeholder(sock, ctx, msg, '🎵 Downloading TikTok (no watermark)...')
+
       try {
-        let title = 'TikTok Video'
-        try {
-          const info = await getInfo(url)
-          title = info.title || title
-        } catch {}
+        let buf, caption
 
-        const buf = await dlToBuffer(url, {
-          format: 'bestvideo[ext=mp4]+bestaudio/best[ext=mp4]/best',
-        }, 'mp4')
+        if (ctx.isPremium) {
+          try {
+            const keyRes = await ctx.api?.getKey?.('tiktok', ctx.senderNumber)
+            if (keyRes?.key) {
+              await editPlaceholder(sock, ph, '🎵 Fetching HD via premium service...')
+              const tt = await rapidTikTok(url, keyRes.key)
+              buf      = await toBuffer(tt.mediaUrl, 'video')
+              caption  = `🎵 *${tt.title}*${tt.author ? '\n👤 @' + tt.author : ''}\n_Firekid XMD Premium — HD No Watermark_`
+            }
+          } catch { /* fall through */ }
+        }
 
-        checkSize(buf, MAX_VIDEO_MB)
+        if (!buf) {
+          const result = await cobalt(url, { downloadMode: 'auto', videoQuality: '720' })
+          buf     = await toBuffer(result.mediaUrl, 'video')
+          caption = `🎵 *TikTok Video*\n_No watermark — Firekid XMD_`
+        }
 
-        await sock.sendMessage(ctx.from, { delete: placeholder.key })
-        await sock.sendMessage(ctx.from, {
-          video:    buf,
-          mimetype: 'video/mp4',
-          caption:  `🎵 *${title}*\n_Downloaded via Firekid XMD_`,
-        }, { quoted: msg })
+        await deletePlaceholder(sock, ph)
+        await sendVideo(sock, msg, ctx, buf, caption)
 
       } catch (err) {
-        await sock.sendMessage(ctx.from, {
-          edit: placeholder.key,
-          text: `❌ TikTok download failed: ${err.message}`
-        })
+        await editPlaceholder(sock, ph, `❌ TikTok download failed: ${err.message}`)
       }
-    }
+    },
   },
 
-  // ── Instagram ──────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────
+  // Instagram — reels, posts, carousels (public only)
+  // Free: cobalt
+  // Note: private accounts require cookies — not supported
+  // ─────────────────────────────────────────────────────────────────
   {
     command:  'ig',
     aliases:  ['instagram', 'igdl', 'insta', 'reels'],
     category: 'downloader',
     handler:  async (sock, msg, ctx) => {
       const url = ctx.query?.trim()
-      if (!url || !url.startsWith('http')) {
-        return sock.sendMessage(ctx.from, {
-          text: [
-            `❌ Provide an Instagram post/reel URL.`,
-            `📌 *Usage:* ${ctx.prefix}ig <instagram url>`,
-            ``,
-            `*Example:*`,
-            `${ctx.prefix}ig https://www.instagram.com/reel/xxxxx`,
-          ].join('\n')
-        }, { quoted: msg })
-      }
-
-      const placeholder = await sock.sendMessage(ctx.from, {
-        text: `📸 Downloading Instagram media...`
+      if (!url?.startsWith('http')) return sock.sendMessage(ctx.from, {
+        text: `❌ *Usage:* ${ctx.prefix}ig <Instagram URL>\n\n*Example:*\n${ctx.prefix}ig https://www.instagram.com/reel/xxxxx\n\n_Only public posts are supported_`
       }, { quoted: msg })
 
+      const ph = await placeholder(sock, ctx, msg, '📸 Downloading Instagram media...')
+
       try {
-        // Try yt-dlp first — it handles reels/posts/stories
-        let buf, isVideo = true
+        const result = await cobalt(url, { downloadMode: 'auto', videoQuality: '720' })
+        const buf    = await toBuffer(result.mediaUrl)
 
-        try {
-          buf = await dlToBuffer(url, {
-            format: 'bestvideo[ext=mp4]+bestaudio/best[ext=mp4]/best',
-          }, 'mp4')
-        } catch {
-          // Fallback: might be an image post
-          buf = await dlToBuffer(url, {
-            format: 'best',
-          }, 'jpg')
-          isVideo = false
-        }
+        await deletePlaceholder(sock, ph)
 
-        checkSize(buf, MAX_VIDEO_MB)
-
-        await sock.sendMessage(ctx.from, { delete: placeholder.key })
-
-        if (isVideo) {
-          await sock.sendMessage(ctx.from, {
-            video:    buf,
-            mimetype: 'video/mp4',
-            caption:  `📸 *Instagram Reel*\n_Downloaded via Firekid XMD_`,
-          }, { quoted: msg })
+        if (result.type === 'image') {
+          await sendImage(sock, msg, ctx, buf, `📸 *Instagram Post*\n_Firekid XMD_`)
         } else {
-          await sock.sendMessage(ctx.from, {
-            image:   buf,
-            caption: `📸 *Instagram Post*\n_Downloaded via Firekid XMD_`,
-          }, { quoted: msg })
+          await sendVideo(sock, msg, ctx, buf, `📸 *Instagram Reel*\n_Firekid XMD_`)
         }
 
       } catch (err) {
-        await sock.sendMessage(ctx.from, {
-          edit: placeholder.key,
-          text: `❌ Instagram download failed: ${err.message}\n\n_Make sure the post is public_`
-        })
+        await editPlaceholder(sock, ph, `❌ Instagram download failed: ${err.message}\n\n_Make sure the post is public_`)
       }
-    }
+    },
   },
 
-  // ── Facebook ───────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────
+  // Facebook — public videos
+  // ─────────────────────────────────────────────────────────────────
   {
     command:  'fb',
     aliases:  ['facebook', 'fbdl', 'fbvid'],
     category: 'downloader',
     handler:  async (sock, msg, ctx) => {
       const url = ctx.query?.trim()
-      if (!url || !url.startsWith('http')) {
-        return sock.sendMessage(ctx.from, {
-          text: [
-            `❌ Provide a Facebook video URL.`,
-            `📌 *Usage:* ${ctx.prefix}fb <facebook video url>`,
-            ``,
-            `*Example:*`,
-            `${ctx.prefix}fb https://www.facebook.com/watch?v=xxxxx`,
-          ].join('\n')
-        }, { quoted: msg })
-      }
-
-      const placeholder = await sock.sendMessage(ctx.from, {
-        text: `📘 Downloading Facebook video...`
+      if (!url?.startsWith('http')) return sock.sendMessage(ctx.from, {
+        text: `❌ *Usage:* ${ctx.prefix}fb <Facebook video URL>\n\n*Example:*\n${ctx.prefix}fb https://www.facebook.com/watch?v=xxxxx`
       }, { quoted: msg })
 
+      const ph = await placeholder(sock, ctx, msg, '📘 Downloading Facebook video...')
+
       try {
-        let title = 'Facebook Video'
-        try {
-          const info = await getInfo(url)
-          title = info.title || title
-        } catch {}
+        const result = await cobalt(url, { downloadMode: 'auto', videoQuality: '720' })
+        const buf    = await toBuffer(result.mediaUrl)
 
-        const buf = await dlToBuffer(url, {
-          format: 'best[ext=mp4]/best',
-        }, 'mp4')
-
-        checkSize(buf, MAX_VIDEO_MB)
-
-        await sock.sendMessage(ctx.from, { delete: placeholder.key })
-        await sock.sendMessage(ctx.from, {
-          video:    buf,
-          mimetype: 'video/mp4',
-          caption:  `📘 *${title}*\n_Downloaded via Firekid XMD_`,
-        }, { quoted: msg })
+        await deletePlaceholder(sock, ph)
+        await sendVideo(sock, msg, ctx, buf, `📘 *Facebook Video*\n_Firekid XMD_`)
 
       } catch (err) {
-        await sock.sendMessage(ctx.from, {
-          edit: placeholder.key,
-          text: `❌ Facebook download failed: ${err.message}\n\n_Make sure the video is public_`
-        })
+        await editPlaceholder(sock, ph, `❌ Facebook download failed: ${err.message}\n\n_Only public videos are supported_`)
       }
-    }
+    },
   },
 
-  // ── Twitter / X ────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────
+  // Twitter / X
+  // ─────────────────────────────────────────────────────────────────
   {
     command:  'twitter',
     aliases:  ['xdl', 'twdl', 'xvideo', 'twitterdl'],
     category: 'downloader',
     handler:  async (sock, msg, ctx) => {
       const url = ctx.query?.trim()
-      if (!url || !url.startsWith('http')) {
-        return sock.sendMessage(ctx.from, {
-          text: [
-            `❌ Provide a Twitter/X post URL.`,
-            `📌 *Usage:* ${ctx.prefix}twitter <twitter/x url>`,
-            ``,
-            `*Example:*`,
-            `${ctx.prefix}twitter https://x.com/user/status/xxxxx`,
-          ].join('\n')
-        }, { quoted: msg })
-      }
-
-      const placeholder = await sock.sendMessage(ctx.from, {
-        text: `🐦 Downloading Twitter/X media...`
+      if (!url?.startsWith('http')) return sock.sendMessage(ctx.from, {
+        text: `❌ *Usage:* ${ctx.prefix}twitter <Twitter/X post URL>\n\n*Example:*\n${ctx.prefix}twitter https://x.com/user/status/xxxxx`
       }, { quoted: msg })
 
+      const ph = await placeholder(sock, ctx, msg, '🐦 Downloading Twitter/X media...')
+
       try {
-        const buf = await dlToBuffer(url, {
-          format: 'best[ext=mp4]/best',
-        }, 'mp4')
+        const result = await cobalt(url, { downloadMode: 'auto', videoQuality: '720' })
+        const buf    = await toBuffer(result.mediaUrl)
 
-        checkSize(buf, MAX_VIDEO_MB)
+        await deletePlaceholder(sock, ph)
 
-        await sock.sendMessage(ctx.from, { delete: placeholder.key })
-        await sock.sendMessage(ctx.from, {
-          video:    buf,
-          mimetype: 'video/mp4',
-          caption:  `🐦 *Twitter/X Video*\n_Downloaded via Firekid XMD_`,
-        }, { quoted: msg })
+        if (result.type === 'image') {
+          await sendImage(sock, msg, ctx, buf, `🐦 *Twitter/X Image*\n_Firekid XMD_`)
+        } else {
+          await sendVideo(sock, msg, ctx, buf, `🐦 *Twitter/X Video*\n_Firekid XMD_`)
+        }
 
       } catch (err) {
-        await sock.sendMessage(ctx.from, {
-          edit: placeholder.key,
-          text: `❌ Twitter/X download failed: ${err.message}\n\n_Only public posts are supported_`
-        })
+        await editPlaceholder(sock, ph, `❌ Twitter/X download failed: ${err.message}\n\n_Only public posts are supported_`)
       }
-    }
+    },
   },
 
-  // ── Spotify ────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────
+  // Spotify
+  // Strategy: oEmbed (no auth) → get track title → YouTube search → cobalt
+  // ─────────────────────────────────────────────────────────────────
   {
     command:  'spotify',
     aliases:  ['spdl', 'spotifydl', 'spmusic'],
     category: 'downloader',
     handler:  async (sock, msg, ctx) => {
       const query = ctx.query?.trim()
-      if (!query) {
-        return sock.sendMessage(ctx.from, {
-          text: [
-            `❌ Provide a Spotify track URL or song name.`,
-            `📌 *Usage:* ${ctx.prefix}spotify <spotify url or song name>`,
-            ``,
-            `*Examples:*`,
-            `${ctx.prefix}spotify https://open.spotify.com/track/xxxxx`,
-            `${ctx.prefix}spotify Burna Boy Alone`,
-          ].join('\n')
-        }, { quoted: msg })
-      }
-
-      const placeholder = await sock.sendMessage(ctx.from, {
-        text: `🎧 Processing Spotify request...`
+      if (!query) return sock.sendMessage(ctx.from, {
+        text: `❌ *Usage:* ${ctx.prefix}spotify <Spotify URL or song name>\n\n*Examples:*\n${ctx.prefix}spotify https://open.spotify.com/track/xxxxx\n${ctx.prefix}spotify Burna Boy Alone`
       }, { quoted: msg })
+
+      const ph = await placeholder(sock, ctx, msg, '🎧 Processing Spotify request...')
 
       try {
         let searchQuery = query
 
-        // If it's a Spotify URL, get the track title first via oEmbed (no auth)
         if (query.includes('spotify.com/track')) {
-          await sock.sendMessage(ctx.from, {
-            edit: placeholder.key,
-            text: `🎧 Fetching Spotify track info...`
-          })
+          await editPlaceholder(sock, ph, '🎧 Fetching track info from Spotify...')
           const title = await spotifyTitle(query)
           if (!title) throw new Error('Could not get track info from Spotify.')
           searchQuery = title
         }
 
-        await sock.sendMessage(ctx.from, {
-          edit: placeholder.key,
-          text: `🎵 Searching and downloading: *${searchQuery}*...`
-        })
+        await editPlaceholder(sock, ph, `🎵 Searching: *${searchQuery}*...`)
 
-        const buf = await dlToBuffer(`ytsearch1:${searchQuery} audio`, {
-          extractAudio: true,
-          audioFormat:  'mp3',
-          audioQuality: '128K',
-          format:       'bestaudio/best',
-        }, 'mp3')
+        const videoId = await youtubeSearch(searchQuery + ' audio')
+        const ytUrl   = `https://www.youtube.com/watch?v=${videoId}`
+        const result  = await cobalt(ytUrl, { downloadMode: 'audio', audioFormat: 'mp3', audioBitrate: '128' })
+        const buf     = await toBuffer(result.mediaUrl, 'audio')
 
-        checkSize(buf, MAX_AUDIO_MB)
-
-        await sock.sendMessage(ctx.from, { delete: placeholder.key })
-        await sock.sendMessage(ctx.from, {
-          audio:    buf,
-          mimetype: 'audio/mpeg',
-          ptt:      false,
-          caption:  `🎧 *${searchQuery}*\n_Downloaded via Firekid XMD_`,
-        }, { quoted: msg })
+        await deletePlaceholder(sock, ph)
+        await sendAudio(sock, msg, ctx, buf, `🎧 *${searchQuery}*\n_Firekid XMD_`)
 
       } catch (err) {
-        await sock.sendMessage(ctx.from, {
-          edit: placeholder.key,
-          text: `❌ Spotify download failed: ${err.message}`
-        })
+        await editPlaceholder(sock, ph, `❌ Spotify download failed: ${err.message}`)
       }
-    }
+    },
   },
 
-  // ── Pinterest ──────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────
+  // Pinterest
+  // Method 1: Pinterest internal resource API (reversed-engineered, no auth)
+  //           Works for public pins — returns original quality video/image
+  // Method 2: Cobalt fallback (also supports Pinterest)
+  // ─────────────────────────────────────────────────────────────────
   {
     command:  'pin',
     aliases:  ['pinterest', 'pindl', 'pindownload'],
     category: 'downloader',
     handler:  async (sock, msg, ctx) => {
       const url = ctx.query?.trim()
-      if (!url || !url.startsWith('http')) {
-        return sock.sendMessage(ctx.from, {
-          text: [
-            `❌ Provide a Pinterest pin URL.`,
-            `📌 *Usage:* ${ctx.prefix}pin <pinterest url>`,
-            ``,
-            `*Example:*`,
-            `${ctx.prefix}pin https://www.pinterest.com/pin/xxxxx`,
-          ].join('\n')
-        }, { quoted: msg })
-      }
-
-      const placeholder = await sock.sendMessage(ctx.from, {
-        text: `📌 Downloading Pinterest media...`
+      if (!url?.startsWith('http')) return sock.sendMessage(ctx.from, {
+        text: `❌ *Usage:* ${ctx.prefix}pin <Pinterest pin URL>\n\n*Example:*\n${ctx.prefix}pin https://www.pinterest.com/pin/xxxxx\n${ctx.prefix}pin https://pin.it/AbCdEf`
       }, { quoted: msg })
 
+      const ph = await placeholder(sock, ctx, msg, '📌 Downloading Pinterest media...')
+
       try {
-        const media = await scrapePinterest(url)
-        const res   = await fetch(media.url, {
-          headers: { 'User-Agent': 'Mozilla/5.0' }
-        })
-        if (!res.ok) throw new Error(`Failed to fetch media: ${res.status}`)
-        const buf = Buffer.from(await res.arrayBuffer())
+        let buf, isVideo
 
-        await sock.sendMessage(ctx.from, { delete: placeholder.key })
+        // Method 1: Pinterest internal API (original quality, fastest)
+        try {
+          const media = await pinterestMedia(url)
+          buf     = await toBuffer(media.mediaUrl, media.type)
+          isVideo = media.type === 'video'
+        } catch {
+          // Method 2: cobalt fallback
+          await editPlaceholder(sock, ph, '📌 Trying alternative method...')
+          const result = await cobalt(url, { downloadMode: 'auto' })
+          buf     = await toBuffer(result.mediaUrl)
+          isVideo = result.type !== 'image'
+        }
 
-        if (media.type === 'video') {
-          checkSize(buf, MAX_VIDEO_MB)
-          await sock.sendMessage(ctx.from, {
-            video:    buf,
-            mimetype: 'video/mp4',
-            caption:  `📌 *Pinterest Video*\n_Downloaded via Firekid XMD_`,
-          }, { quoted: msg })
+        await deletePlaceholder(sock, ph)
+
+        if (isVideo) {
+          await sendVideo(sock, msg, ctx, buf, `📌 *Pinterest Video*\n_Firekid XMD_`)
         } else {
-          checkSize(buf, MAX_VIDEO_MB)
-          await sock.sendMessage(ctx.from, {
-            image:   buf,
-            caption: `📌 *Pinterest Image*\n_Downloaded via Firekid XMD_`,
-          }, { quoted: msg })
+          await sendImage(sock, msg, ctx, buf, `📌 *Pinterest Image*\n_Firekid XMD_`)
         }
 
       } catch (err) {
-        await sock.sendMessage(ctx.from, {
-          edit: placeholder.key,
-          text: `❌ Pinterest download failed: ${err.message}`
-        })
+        await editPlaceholder(sock, ph, `❌ Pinterest download failed: ${err.message}`)
       }
-    }
+    },
   },
 
-  // ── Google Drive ───────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────
+  // Reddit — images, videos, gifs (public posts)
+  // Free: cobalt
+  // ─────────────────────────────────────────────────────────────────
+  {
+    command:  'reddit',
+    aliases:  ['rdl', 'redditsave', 'reddl'],
+    category: 'downloader',
+    handler:  async (sock, msg, ctx) => {
+      const url = ctx.query?.trim()
+      if (!url?.startsWith('http')) return sock.sendMessage(ctx.from, {
+        text: `❌ *Usage:* ${ctx.prefix}reddit <Reddit post URL>\n\n*Example:*\n${ctx.prefix}reddit https://www.reddit.com/r/memes/comments/xxxxx`
+      }, { quoted: msg })
+
+      const ph = await placeholder(sock, ctx, msg, '🤖 Downloading Reddit media...')
+
+      try {
+        const result = await cobalt(url, { downloadMode: 'auto', videoQuality: '720' })
+        const buf    = await toBuffer(result.mediaUrl)
+
+        await deletePlaceholder(sock, ph)
+
+        if (result.type === 'image') {
+          await sendImage(sock, msg, ctx, buf, `🤖 *Reddit Post*\n_Firekid XMD_`)
+        } else {
+          await sendVideo(sock, msg, ctx, buf, `🤖 *Reddit Video*\n_Firekid XMD_`)
+        }
+
+      } catch (err) {
+        await editPlaceholder(sock, ph, `❌ Reddit download failed: ${err.message}`)
+      }
+    },
+  },
+
+  // ─────────────────────────────────────────────────────────────────
+  // SoundCloud — free streaming tracks (no auth)
+  // Free: cobalt
+  // ─────────────────────────────────────────────────────────────────
+  {
+    command:  'sc',
+    aliases:  ['soundcloud', 'scdl'],
+    category: 'downloader',
+    handler:  async (sock, msg, ctx) => {
+      const url = ctx.query?.trim()
+      if (!url?.startsWith('http')) return sock.sendMessage(ctx.from, {
+        text: `❌ *Usage:* ${ctx.prefix}sc <SoundCloud track URL>\n\n*Example:*\n${ctx.prefix}sc https://soundcloud.com/artist/trackname`
+      }, { quoted: msg })
+
+      const ph = await placeholder(sock, ctx, msg, '🎶 Downloading SoundCloud track...')
+
+      try {
+        const result = await cobalt(url, { downloadMode: 'audio', audioFormat: 'mp3', audioBitrate: '128' })
+        const buf    = await toBuffer(result.mediaUrl, 'audio')
+
+        await deletePlaceholder(sock, ph)
+        await sendAudio(sock, msg, ctx, buf, `🎶 *SoundCloud Track*\n_Firekid XMD_`)
+
+      } catch (err) {
+        await editPlaceholder(sock, ph, `❌ SoundCloud download failed: ${err.message}`)
+      }
+    },
+  },
+
+  // ─────────────────────────────────────────────────────────────────
+  // Google Drive — public files (any type)
+  // Free: direct link + confirmation bypass
+  // ─────────────────────────────────────────────────────────────────
   {
     command:  'gdrive',
     aliases:  ['gdl', 'gdrivedl', 'gddownload'],
     category: 'downloader',
     handler:  async (sock, msg, ctx) => {
       const url = ctx.query?.trim()
-      if (!url || !url.includes('drive.google.com')) {
-        return sock.sendMessage(ctx.from, {
-          text: [
-            `❌ Provide a public Google Drive file link.`,
-            `📌 *Usage:* ${ctx.prefix}gdrive <drive link>`,
-            ``,
-            `*Example:*`,
-            `${ctx.prefix}gdrive https://drive.google.com/file/d/xxxxx/view`,
-            ``,
-            `_The file must be shared as "Anyone with the link"_`
-          ].join('\n')
-        }, { quoted: msg })
-      }
-
-      const placeholder = await sock.sendMessage(ctx.from, {
-        text: `☁️ Fetching Google Drive file...`
+      if (!url?.includes('drive.google.com')) return sock.sendMessage(ctx.from, {
+        text: `❌ *Usage:* ${ctx.prefix}gdrive <Google Drive link>\n\n*Example:*\n${ctx.prefix}gdrive https://drive.google.com/file/d/xxxxx/view\n\n_File must be shared as "Anyone with the link"_`
       }, { quoted: msg })
 
+      const ph = await placeholder(sock, ctx, msg, '☁️ Fetching Google Drive file...')
+
       try {
-        const directUrl = gdriveDirectUrl(url)
+        const { buf, fname, mime } = await gdriveDownload(url)
+        checkSize(buf, MAX_VIDEO_MB, 'File')
 
-        const res = await fetch(directUrl, {
-          headers: { 'User-Agent': 'Mozilla/5.0' },
-          redirect: 'follow',
-        })
-
-        if (!res.ok) throw new Error(`Drive returned ${res.status}. Make sure the file is publicly shared.`)
-
-        const contentType = res.headers.get('content-type') || 'application/octet-stream'
-
-        // Detect virus-warning page
-        const isHtml = contentType.includes('text/html')
-        if (isHtml) {
-          // Large file — Google shows a confirmation page, extract confirm token
-          const html = await res.text()
-          const confirmMatch = html.match(/confirm=([A-Za-z0-9_-]+)/)
-          if (!confirmMatch) throw new Error('File may be too large or restricted by Google Drive.')
-
-          const confirm = confirmMatch[1]
-          const fileId  = directUrl.match(/id=([^&]+)/)?.[1]
-          const newUrl  = `https://drive.usercontent.google.com/download?id=${fileId}&export=download&authuser=0&confirm=${confirm}`
-
-          const res2    = await fetch(newUrl, { headers: { 'User-Agent': 'Mozilla/5.0' }, redirect: 'follow' })
-          if (!res2.ok) throw new Error(`Failed to download: ${res2.status}`)
-
-          const buf2 = Buffer.from(await res2.arrayBuffer())
-          checkSize(buf2, MAX_VIDEO_MB)
-
-          const mime2 = res2.headers.get('content-type') || 'application/octet-stream'
-          const cd2   = res2.headers.get('content-disposition') || ''
-          const fname = cd2.match(/filename[^;=\n]*=([^;\n]*)/)?.[1]?.replace(/['"]/g, '').trim() || 'gdrive_file'
-
-          await sock.sendMessage(ctx.from, { delete: placeholder.key })
-          return sock.sendMessage(ctx.from, {
-            document: buf2,
-            fileName: fname,
-            mimetype: mime2.split(';')[0].trim(),
-            caption:  `☁️ *${fname}*\n📦 Size: ${(buf2.length / MB).toFixed(2)}MB`,
-          }, { quoted: msg })
-        }
-
-        const buf  = Buffer.from(await res.arrayBuffer())
-        checkSize(buf, MAX_VIDEO_MB)
-
-        const cd    = res.headers.get('content-disposition') || ''
-        const fname = cd.match(/filename[^;=\n]*=([^;\n]*)/)?.[1]?.replace(/['"]/g, '').trim() || 'gdrive_file'
-        const mime  = contentType.split(';')[0].trim()
-
-        await sock.sendMessage(ctx.from, { delete: placeholder.key })
+        await deletePlaceholder(sock, ph)
         await sock.sendMessage(ctx.from, {
           document: buf,
           fileName: fname,
           mimetype: mime,
-          caption:  `☁️ *${fname}*\n📦 Size: ${(buf.length / MB).toFixed(2)}MB`,
+          caption:  `☁️ *${fname}*\n📦 ${(buf.length / MB).toFixed(2)} MB`,
         }, { quoted: msg })
 
       } catch (err) {
-        await sock.sendMessage(ctx.from, {
-          edit: placeholder.key,
-          text: `❌ Google Drive download failed: ${err.message}`
-        })
+        await editPlaceholder(sock, ph, `❌ Google Drive download failed: ${err.message}`)
       }
-    }
+    },
   },
 
 ]
