@@ -22,45 +22,60 @@ const section = (title, cmds, prefix) => {
   return [`\n.————< ${title} >————.`, ...lines, `'————————————————'`].join('\n')
 }
 
-const buildMenu = (prefix, botName, uptime, ram, ping, mode, name, cmdCount) => {
-  const now = new Date()
+const planBadge = (plan, isOwner) => {
+  if (isOwner)              return '👑 OWNER'
+  if (plan === 'sudo')      return '🔐 SUDO'
+  if (plan === 'premium')   return '⭐ PREMIUM'
+  return '🆓 FREE'
+}
+
+const buildMenu = (prefix, botName, uptime, ram, ping, mode, name, cmdCount, plan, isOwner) => {
+  const now  = new Date()
   const date = now.toLocaleDateString('en-GB')
   const time = now.toLocaleTimeString()
+  const badge = planBadge(plan, isOwner)
 
   const header = [
-    `*${botName}*`,
+    `╔═══════════════════════╗`,
+    `║    *${botName}*`,
+    `╚═══════════════════════╝`,
     ``,
-    `| Mode:    ${mode}`,
-    `| User:    ${name}`,
-    `| Plugins: ${cmdCount}`,
-    `| Uptime:  ${uptime}`,
-    `| Date:    ${date}`,
-    `| Time:    ${time}`,
-    `| RAM:     ${ram}`,
-    `| Ping:    ${ping}ms`,
+    `| 👤 User:    ${name}`,
+    `| 🎖️  Plan:    ${badge}`,
+    `| 🤖 Mode:    ${mode}`,
+    `| 📦 Plugins: ${cmdCount}`,
+    `| ⏱️  Uptime:  ${uptime}`,
+    `| 📅 Date:    ${date}`,
+    `| 🕐 Time:    ${time}`,
+    `| 💾 RAM:     ${ram}`,
+    `| 📶 Ping:    ${ping}ms`,
     ``,
-    `Command List`,
+    `*Command List*`,
   ].join('\n')
 
   const menu = [
     header,
-    section('AI & CHAT', ['ai', 'gemini', 'gpt', 'deepseek', 'think', 'debate', 'roast', 'story', 'poem', 'rap', 'translate', 'summarize', 'fix', 'explain'], prefix),
-    section('DOWNLOADER', ['play', 'video', 'ytmp3', 'ytmp4', 'fb', 'ig', 'tt', 'twitter', 'pin', 'spotify', 'apk', 'gdrive'], prefix),
-    section('STICKER', ['sticker', 'take', 'tgsticker', 'removebg'], prefix),
-    section('AUDIO FX', ['bass', 'nightcore', 'slow', 'deep', 'robot', 'reverse', 'earrape', 'fat', 'squirrel', 'shazam'], prefix),
-    section('GROUP', ['add', 'kick', 'promote', 'demote', 'tagall', 'hidetag', 'mute', 'unmute', 'lock', 'unlock', 'invite', 'revoke', 'kickall', 'leavegc', 'groupname', 'groupdesc', 'listmembers', 'admins', 'warn', 'resetwarn', 'warnlist', 'poll'], prefix),
+    section('AI & CHAT',      ['ai', 'groq', 'gemini', 'gpt', 'deepseek', 'think', 'debate', 'roast', 'story', 'poem', 'rap', 'translate', 'summarize', 'fix', 'explain'], prefix),
+    section('DOWNLOADER',     ['play', 'video', 'ytmp3', 'ytmp4', 'fb', 'ig', 'tt', 'twitter', 'pin', 'spotify', 'apk', 'gdrive'], prefix),
+    section('STICKER',        ['sticker', 'take', 'tgsticker', 'removebg'], prefix),
+    section('AUDIO FX',       ['bass', 'nightcore', 'slow', 'deep', 'robot', 'reverse', 'earrape', 'fat', 'squirrel', 'shazam'], prefix),
+    section('GROUP',          ['add', 'kick', 'promote', 'demote', 'tagall', 'hidetag', 'mute', 'unmute', 'lock', 'unlock', 'invite', 'revoke', 'kickall', 'leavegc', 'groupname', 'groupdesc', 'listmembers', 'admins', 'warn', 'resetwarn', 'warnlist', 'poll'], prefix),
     section('ANTI / PROTECT', ['antilink', 'antisticker', 'antinsfw', 'antimedia', 'antibad', 'addbadword', 'delbadword', 'badwordlist', 'antibug', 'anticall', 'floodblock', 'antitemu', 'antidelete'], prefix),
-    section('AUTOMATION', ['autotyping', 'autorecording', 'autoread', 'autoreact', 'autoviewstatus', 'autoreactstatus', 'autobio', 'alwaysonline', 'chatbot', 'schedmsg'], prefix),
-    section('MODES', ['nightmode', 'slowmode', 'newbiemode', 'lockdown', 'safezone'], prefix),
-    section('CHANNELS', ['createchannel', 'channelinfo', 'newsearch', 'followchannel', 'unfollowchannel', 'mutechannel', 'unmutechannel'], prefix),
-    section('ECONOMY', ['daily', 'balance', 'work', 'crime', 'gamble', 'slots', 'give', 'leaderboard', 'rank'], prefix),
-    section('GAMES', ['truth', 'dare', '8ball', 'rps', 'dice', 'coinflip', 'trivia', 'riddle', 'guess', 'wcg'], prefix),
-    section('PROFILE', ['jid', 'gjid', 'setmyname', 'updatebio', 'getprivacy', 'setonline', 'setlastseen', 'groupsprivacy', 'setppall', 'setreadreceipts', 'savecontact'], prefix),
-    section('SOCIAL', ['gcannounce', 'spotlight', 'groupmood', 'confession', 'suggest', 'suggestions', 'todayinhistory', 'groupwrap'], prefix),
-    section('CONVERSATION', ['unsend', 'recall', 'vanish', 'whisper', 'forwardnuke', 'seen', 'lastseen', 'callout', 'overthink'], prefix),
-    section('SYSTEM', ['ping', 'alive', 'uptime', 'time', 'date', 'ram', 'cpu', 'disk', 'platform', 'about', 'owner', 'support', 'changelog'], prefix),
-    section('OWNER', ['mode-public', 'mode-private', 'sudo', 'delsudo', 'listsudo', 'premium', 'delpremium', 'block', 'unblock', 'ban', 'unban', 'broadcast', 'shutdown', 'restart', 'setpp', 'setbio', 'addapikey', 'listapikeys', 'cleardata', 'report'], prefix),
-    `\n_Type ${prefix}help <command> for more info_`,
+    section('AUTOMATION',     ['autotyping', 'autorecording', 'autoread', 'autoreact', 'autoviewstatus', 'autoreactstatus', 'autobio', 'alwaysonline', 'chatbot', 'schedmsg'], prefix),
+    section('MODES',          ['nightmode', 'slowmode', 'newbiemode', 'lockdown', 'safezone'], prefix),
+    section('CHANNELS',       ['createchannel', 'channelinfo', 'newsearch', 'followchannel', 'unfollowchannel', 'mutechannel', 'unmutechannel'], prefix),
+    section('ECONOMY',        ['daily', 'balance', 'work', 'crime', 'gamble', 'slots', 'give', 'leaderboard', 'rank'], prefix),
+    section('GAMES',          ['truth', 'dare', '8ball', 'rps', 'dice', 'coinflip', 'trivia', 'riddle', 'guess', 'wcg'], prefix),
+    section('PROFILE',        ['jid', 'gjid', 'setmyname', 'updatebio', 'getprivacy', 'setonline', 'setlastseen', 'groupsprivacy', 'setppall', 'setreadreceipts', 'savecontact'], prefix),
+    section('SOCIAL',         ['gcannounce', 'spotlight', 'groupmood', 'confession', 'suggest', 'suggestions', 'todayinhistory', 'groupwrap'], prefix),
+    section('CONVERSATION',   ['unsend', 'recall', 'vanish', 'whisper', 'forwardnuke', 'seen', 'lastseen', 'callout', 'overthink'], prefix),
+    section('SYSTEM',         ['ping', 'alive', 'uptime', 'time', 'date', 'ram', 'cpu', 'disk', 'platform', 'about', 'owner', 'support', 'repo', 'changelog'], prefix),
+    section('OWNER',          ['mode-public', 'mode-private', 'sudo', 'delsudo', 'listsudo', 'ban', 'unban', 'block', 'unblock', 'broadcast', 'shutdown', 'restart', 'setpp', 'setbio', 'cleardata', 'report'], prefix),
+    ``,
+    `_Type ${prefix}help <command> for details_`,
+    plan === 'free'
+      ? `_⭐ Upgrade to Premium: https://firekidofficial.name.ng_`
+      : `_🔥 Thanks for supporting Firekid XMD!_`,
   ].join('\n')
 
   return menu
@@ -90,6 +105,8 @@ export default [
         mode,
         ctx.pushName || ctx.senderNumber,
         '500+',
+        ctx.plan || 'free',
+        ctx.isOwner,
       )
 
       await sock.sendMessage(ctx.from, {
