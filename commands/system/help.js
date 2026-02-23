@@ -4,6 +4,64 @@
 // .help <cmd>    → shows full help for that command
 
 const HELP = {
+  // ── TOOLS / FAKE ──────────────────────────────────────────────────────────
+  opay: {
+    category: 'Tools / Fake',
+    desc: 'Generate a realistic fake OPay transaction receipt.',
+    usage: '.opay <amount> | <receiver name> | <receiver bank> | <receiver account> | <sender name> | <sender bank>',
+    example: '.opay 1650 | JAYWONULTIMATE ENTERPRISES | MONIE POINT | 8253381685 | RAMAT OYINLOLA YAHAYA | OPay',
+    note: 'For entertainment purposes only.',
+  },
+  fakecall: {
+    category: 'Tools / Fake',
+    desc: 'Generate a fake incoming call screen.',
+    usage: '.fakecall <name or number>',
+    example: '.fakecall +2348012345678',
+  },
+  fakefb: {
+    category: 'Tools / Fake',
+    desc: 'Generate a fake Facebook post.',
+    usage: '.fakefb <name> | <post text>',
+    example: '.fakefb John Doe | Just had the best jollof rice ever! 🍚🔥',
+  },
+  fakeinsta: {
+    category: 'Tools / Fake',
+    desc: 'Generate a fake Instagram post.',
+    usage: '.fakeinsta <username> | <caption>',
+    example: '.fakeinsta firekid_ng | Living my best life ✨🔥',
+  },
+  fakecc: {
+    category: 'Tools / Fake',
+    desc: 'Generate a fake test credit card number (for dev/testing only).',
+    usage: '.fakecc <visa|mastercard|amex|discover> [count]',
+    example: '.fakecc visa 3',
+    note: 'For development/testing only. Not a real card.',
+  },
+  fakeid: {
+    category: 'Tools / Fake',
+    desc: 'Generate a random fake identity (name, address, credentials).',
+    usage: '.fakeid [country code]',
+    example: '.fakeid NG',
+    note: 'Supports: US GB CA AU FR DE NG ZA BR IN JP KR and more.',
+  },
+  ngl: {
+    category: 'Tools / Fake',
+    desc: 'Generate an anonymous NGL link for a username.',
+    usage: '.ngl <username>',
+    example: '.ngl yourname',
+  },
+  cc: {
+    category: 'Tools / Fake',
+    desc: 'Look up a bank BIN (first 6-8 digits of a card number).',
+    usage: '.cc <BIN>',
+    example: '.cc 411111',
+  },
+  iphone: {
+    category: 'Tools / Fake',
+    desc: 'Frame an image inside an iPhone mockup.',
+    usage: 'Reply to an image + .iphone',
+  },
+
   // ── AI & CHAT ─────────────────────────────────────────────────────────────
   ai: {
     category: 'AI & Chat',
