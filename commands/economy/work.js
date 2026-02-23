@@ -1,79 +1,46 @@
 const FC = '🔥'
-const WORK_CD  = 60 * 60 * 1000
-const CRIME_CD = 2 * 60 * 60 * 1000
-const pick = arr => arr[Math.floor(Math.random() * arr.length)]
-const timeLeft = (f) => { const d = Math.max(0, f - Date.now()); const h = Math.floor(d / 3600000); const m = Math.floor((d % 3600000) / 60000); return h > 0 ? `${h}h ${m}m` : `${m}m` }
-
-const JOBS = [
-  { job: 'Software Developer',   action: 'Fixed a nasty bug',           min: 80,  max: 250 },
-  { job: 'Content Creator',      action: 'Made a viral post',           min: 60,  max: 300 },
-  { job: 'Delivery Driver',      action: 'Completed 12 deliveries',     min: 50,  max: 150 },
-  { job: 'Street Vendor',        action: 'Sold out your stock',         min: 40,  max: 180 },
-  { job: 'Graphic Designer',     action: 'Finished a client logo',      min: 70,  max: 220 },
-  { job: 'Music Producer',       action: 'Sold a beat online',          min: 90,  max: 280 },
-  { job: 'Barber',               action: 'Cut 8 heads today',           min: 45,  max: 130 },
-  { job: 'Chef',                 action: 'Cooked for a big event',      min: 65,  max: 210 },
-  { job: 'Photographer',         action: 'Shot a wedding event',        min: 100, max: 350 },
-]
-
-const CRIMES = [
-  { crime: 'Phone Scam',          caught: 'Victim traced the call',           min: 150, max: 500, fine: 100 },
-  { crime: 'Fuel Hoarding',       caught: 'NNPC officials raided your store', min: 200, max: 600, fine: 150 },
-  { crime: 'Fake Products',       caught: 'Customer reported you to NAFDAC',  min: 120, max: 400, fine: 90  },
-  { crime: 'Market Overpricing',  caught: 'Consumer protection showed up',    min: 100, max: 350, fine: 80  },
-  { crime: 'Counterfeit Cash',    caught: 'Bank teller spotted the fakes',    min: 300, max: 800, fine: 200 },
-  { crime: 'Touting',             caught: 'Area boys turned on you',          min: 60,  max: 200, fine: 50  },
-]
+const nowSec = () => Math.floor(Date.now() / 1000)
+const fmtSecs = (s) => { const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60; if (h>0) return `${h}h ${m}m`; if (m>0) return `${m}m ${sec}s`; return `${sec}s` }
+const JOBS = ['delivered packages 📦','fixed computers 💻','drove a taxi 🚗','sold hotdogs 🌭','wrote code 🖥️','painted a house 🎨','washed cars 🚙','walked dogs 🐕','cooked food 🍳','tutored students 📚']
+const CRIMES_WIN = ['robbed a bank 🏦','hacked an ATM 💻','picked pockets 👝','sold bootleg DVDs 📀']
+const CRIMES_LOSE = ['got caught shoplifting 🛒','slipped running from cops 🚓','got caught hacking 💻','dropped the bag 🎒']
 
 export default [
   {
-    command: 'work',
-    aliases: ['hustle', 'grind'],
+    command: 'work', aliases: ['job', 'earn'], category: 'economy',
+    description: 'Work to earn FireCoins', usage: '.work', example: '.work',
     handler: async (sock, msg, ctx, { api }) => {
-      const res  = await api.getEco(ctx.sender)
-      const eco  = res.eco || {}
-      const last = eco.last_work || 0
-      const next = last + WORK_CD
-      if (last && Date.now() < next) {
-        return sock.sendMessage(ctx.from, { text: `⏳ *Still working...*\n\nRest first. Come back in *${timeLeft(next)}*.` }, { quoted: msg })
-      }
-      const s      = pick(JOBS)
-      const earned = Math.floor(Math.random() * (s.max - s.min + 1)) + s.min
-      const bonus  = ctx.isPremium ? Math.floor(earned * 0.25) : 0
-      const total  = earned + bonus
-      const newBal = (eco.balance ?? 0) + total
-      await Promise.all([api.setEco(ctx.sender, 'balance', newBal), api.setEco(ctx.sender, 'last_work', Date.now())])
-      await sock.sendMessage(ctx.from, {
-        text: [`💼 *Work Complete*`, ``, `👷 *Job:* ${s.job}`, `✅ *Task:* ${s.action}`, ``, `+${earned} ${FC}${bonus ? ` +${bonus} ${FC} _(premium)_` : ''}`, ``, `🏦 *Balance:* ${newBal} ${FC}`, `_Next shift in 1 hour_`].join('\n')
-      }, { quoted: msg })
+      const res = await api.getEco(ctx.senderStorageJid || ctx.sender)
+      const eco = res?.eco || {}
+      const cfgRes = await api.getSetting('work_config')
+      const cfg = cfgRes?.value || {}
+      const cd = ctx.isPremium ? (cfg.premiumCooldown || 1800) : (cfg.freeCooldown || 3600)
+      const diff = nowSec() - (eco.last_work || 0)
+      if (diff < cd) return sock.sendMessage(ctx.from, { text: `⏳ Still tired! Work again in *${fmtSecs(cd - diff)}*` }, { quoted: msg })
+      const earned = Math.floor(Math.random() * ((cfg.max || 400) - (cfg.min || 100) + 1)) + (cfg.min || 100)
+      const newBal = (eco.balance ?? 0) + earned
+      const job = JOBS[Math.floor(Math.random() * JOBS.length)]
+      await Promise.all([api.setEco(ctx.senderStorageJid || ctx.sender, 'balance', newBal), api.setEco(ctx.senderStorageJid || ctx.sender, 'last_work', nowSec())])
+      await sock.sendMessage(ctx.from, { text: `💼 You ${job} and earned *+${earned} ${FC}*!\n💰 Balance: *${newBal} ${FC}*` }, { quoted: msg })
     }
   },
   {
-    command: 'crime',
-    aliases: ['hustle2'],
+    command: 'crime', aliases: ['rob', 'steal'], category: 'economy',
+    description: 'Commit a crime for big rewards or losses', usage: '.crime', example: '.crime',
     handler: async (sock, msg, ctx, { api }) => {
-      const res  = await api.getEco(ctx.sender)
-      const eco  = res.eco || {}
-      const last = eco.last_crime || 0
-      const next = last + CRIME_CD
-      if (last && Date.now() < next) {
-        return sock.sendMessage(ctx.from, { text: `⏳ *Laying low...*\n\nHeat is still on. Come back in *${timeLeft(next)}*.` }, { quoted: msg })
-      }
-      const s      = pick(CRIMES)
-      const caught = Math.random() < 0.35
-      const now    = Date.now()
-      await api.setEco(ctx.sender, 'last_crime', now)
-      if (caught) {
-        const fine   = s.fine + Math.floor(Math.random() * 50)
-        const newBal = Math.max(0, (eco.balance ?? 0) - fine)
-        await api.setEco(ctx.sender, 'balance', newBal)
-        await sock.sendMessage(ctx.from, { text: [`🚨 *Caught!*`, ``, `🦹 *Crime:* ${s.crime}`, `👮 ${s.caught}`, ``, `-${fine} ${FC} _(fine)_`, `🏦 *Balance:* ${newBal} ${FC}`, `_Lay low for 2 hours_`].join('\n') }, { quoted: msg })
-      } else {
-        const earned = Math.floor(Math.random() * (s.max - s.min + 1)) + s.min
-        const newBal = (eco.balance ?? 0) + earned
-        await api.setEco(ctx.sender, 'balance', newBal)
-        await sock.sendMessage(ctx.from, { text: [`🦹 *Crime Successful!*`, ``, `🎭 *Crime:* ${s.crime}`, `✅ Got away clean!`, ``, `+${earned} ${FC}`, `🏦 *Balance:* ${newBal} ${FC}`, `_Wait 2 hours before next job_`].join('\n') }, { quoted: msg })
-      }
+      const res = await api.getEco(ctx.senderStorageJid || ctx.sender)
+      const eco = res?.eco || {}
+      const cfgRes = await api.getSetting('crime_config')
+      const cfg = cfgRes?.value || {}
+      const cd = ctx.isPremium ? (cfg.premiumCooldown || 3600) : (cfg.freeCooldown || 7200)
+      const diff = nowSec() - (eco.last_crime || 0)
+      if (diff < cd) return sock.sendMessage(ctx.from, { text: `⏳ Cops are still watching! Lay low for *${fmtSecs(cd - diff)}*` }, { quoted: msg })
+      const win = Math.random() < (cfg.winChance || 0.6)
+      const reward = win ? (cfg.win || 600) : (cfg.loss || 200)
+      const newBal = win ? (eco.balance ?? 0) + reward : Math.max(0, (eco.balance ?? 0) - reward)
+      const act = win ? CRIMES_WIN[Math.floor(Math.random() * CRIMES_WIN.length)] : CRIMES_LOSE[Math.floor(Math.random() * CRIMES_LOSE.length)]
+      await Promise.all([api.setEco(ctx.senderStorageJid || ctx.sender, 'balance', newBal), api.setEco(ctx.senderStorageJid || ctx.sender, 'last_crime', nowSec())])
+      await sock.sendMessage(ctx.from, { text: win ? `😈 You ${act} and got *+${reward} ${FC}*!\n💰 Balance: *${newBal} ${FC}*` : `🚨 You ${act} and lost *-${reward} ${FC}*!\n💰 Balance: *${newBal} ${FC}*` }, { quoted: msg })
     }
-  }
+  },
 ]
