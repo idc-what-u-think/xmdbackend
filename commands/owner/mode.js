@@ -39,6 +39,7 @@ export default [
     }
   },
 
+  // ── sudo — now writes to D1 via setPlan ──────────────────────────────────
   {
     command: 'sudo',
     aliases: ['addsudo', 'addmod'],
@@ -53,24 +54,30 @@ export default [
         }, { quoted: msg })
       }
 
-      if (targetJid === ctx.sender) {
+      if (targetJid === ctx.sender || targetJid === ctx.senderStorageJid) {
         return sock.sendMessage(ctx.from, {
           text: '❌ You are already the owner — no need to add yourself as sudo.'
         }, { quoted: msg })
       }
 
-      const res = await api.sessionGet('sudo_list')
-      const sudoList = res?.value ? JSON.parse(res.value) : []
+      // Normalise JID to storage format (always @s.whatsapp.net)
+      const normalised = targetJid.split('@')[0].replace(/\D/g, '') + '@s.whatsapp.net'
 
-      if (sudoList.includes(targetJid)) {
+      // Write to D1 — this is what isSudo actually reads
+      const res = await api.setPlan(normalised, 'sudo')
+      if (!res?.ok) {
         return sock.sendMessage(ctx.from, {
-          text: `⚠️ @${targetJid.split('@')[0]} is already a sudo user.`,
-          mentions: [targetJid]
+          text: `❌ Failed to grant sudo. Worker error: ${res?.error || 'unknown'}`
         }, { quoted: msg })
       }
 
-      sudoList.push(targetJid)
-      await api.sessionSet('sudo_list', JSON.stringify(sudoList))
+      // Also keep a readable list in session KV for .listsudo display
+      const listRes = await api.sessionGet('sudo_list')
+      const sudoList = listRes?.value ? JSON.parse(listRes.value) : []
+      if (!sudoList.includes(normalised)) {
+        sudoList.push(normalised)
+        await api.sessionSet('sudo_list', JSON.stringify(sudoList))
+      }
 
       await sock.sendMessage(ctx.from, {
         text: [
@@ -86,6 +93,7 @@ export default [
     }
   },
 
+  // ── delsudo — removes plan from D1 back to 'free' ────────────────────────
   {
     command: 'delsudo',
     aliases: ['removesudo', 'unmod', 'rmsudo'],
@@ -100,17 +108,19 @@ export default [
         }, { quoted: msg })
       }
 
-      const res = await api.sessionGet('sudo_list')
-      const sudoList = res?.value ? JSON.parse(res.value) : []
+      const normalised = targetJid.split('@')[0].replace(/\D/g, '') + '@s.whatsapp.net'
 
-      if (!sudoList.includes(targetJid)) {
+      const res = await api.setPlan(normalised, 'free')
+      if (!res?.ok) {
         return sock.sendMessage(ctx.from, {
-          text: `❌ @${targetJid.split('@')[0]} is not a sudo user.`,
-          mentions: [targetJid]
+          text: `❌ Failed to remove sudo. Worker error: ${res?.error || 'unknown'}`
         }, { quoted: msg })
       }
 
-      const updated = sudoList.filter(j => j !== targetJid)
+      // Remove from display list too
+      const listRes = await api.sessionGet('sudo_list')
+      const sudoList = listRes?.value ? JSON.parse(listRes.value) : []
+      const updated = sudoList.filter(j => j !== normalised)
       await api.sessionSet('sudo_list', JSON.stringify(updated))
 
       await sock.sendMessage(ctx.from, {
@@ -125,6 +135,7 @@ export default [
     }
   },
 
+  // ── listsudo — reads the display list from session KV ────────────────────
   {
     command: 'listsudo',
     aliases: ['sudolist', 'mods', 'listmods'],
@@ -147,7 +158,7 @@ export default [
           `👥 *Sudo Users (${sudoList.length})*`,
           `${'─'.repeat(26)}`,
           ``,
-          `👑 Owner: @${ctx.botNumber} *(permanent)*`,
+          `👑 Owner: @${ctx.ownerNumber} *(permanent)*`,
           ``,
           ...lines,
           ``,
