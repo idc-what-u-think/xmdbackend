@@ -55,6 +55,7 @@ const buildMenu = (prefix, botName, uptime, ram, ping, mode, name, cmdCount, pla
 
   const menu = [
     header,
+    section('TOOLS / FAKE',   ['opay', 'fakecall', 'fakefb', 'fakeinsta', 'fakecc', 'fakeid', 'ngl', 'cc', 'iphone'], prefix),
     section('AI & CHAT',      ['ai', 'groq', 'gemini', 'gpt', 'deepseek', 'think', 'debate', 'roast', 'story', 'poem', 'rap', 'translate', 'summarize', 'fix', 'explain'], prefix),
     section('DOWNLOADER',     ['play', 'video', 'ytmp3', 'ytmp4', 'fb', 'ig', 'tt', 'twitter', 'pin', 'spotify', 'apk', 'gdrive'], prefix),
     section('STICKER',        ['sticker', 'take', 'tgsticker', 'removebg'], prefix),
