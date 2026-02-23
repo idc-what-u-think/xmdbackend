@@ -84,7 +84,7 @@ const buildMenu = (prefix, botName, uptime, ram, ping, mode, name, cmdCount, pla
 export default [
   {
     command: 'menu',
-    aliases: ['help', 'commands', 'cmd'],
+    aliases: ['commands', 'cmd'],
     category: 'system',
     handler: async (sock, msg, ctx, { api }) => {
       const mem    = process.memoryUsage()
