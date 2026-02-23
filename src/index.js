@@ -120,7 +120,21 @@ app.get('/internal/commands/bundle', auth, (req, res) => {
     return res.status(500).json({ ok: false, error: 'Could not read commands directory' })
   }
 
-  res.json({ ok: true, files })
+  // Rewrite relative imports so they work after files are flattened into /tmp/firekid_cmds/
+  // e.g. in "game/listener.js": from './wcg.js' → from './game_wcg.js'
+  const rewritten = {}
+  for (const [rel, content] of Object.entries(files)) {
+    const folder = rel.includes('/') ? rel.split('/')[0] : null
+    let fixed = content
+    if (folder) {
+      fixed = fixed.replace(/from\s+(['"])\.\/([^'"]+\.js)\1/g, (_, quote, name) => {
+        return `from ${quote}./${folder}_${name}${quote}`
+      })
+    }
+    rewritten[rel] = fixed
+  }
+
+  res.json({ ok: true, files: rewritten })
 })
 
 const startPairing = async (phone, pendingId, botMode, codeAlreadySent = false) => {
