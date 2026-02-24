@@ -331,6 +331,73 @@ const HELP = {
   setbio: { category: 'Owner', desc: "Change the bot's bio. Max 139 chars.", usage: '.setbio <text>', flags: 'sudoOnly' },
   'mode-public': { category: 'Owner', desc: 'Open bot to all users.', usage: '.mode-public', flags: 'ownerOnly' },
   'mode-private': { category: 'Owner', desc: 'Restrict bot to owner only.', usage: '.mode-private', flags: 'ownerOnly' },
+
+  // ── SEARCH & LOOKUP ───────────────────────────────────────────────────────
+  google:       { category: 'Search', desc: 'Google/DuckDuckGo instant search results.', usage: '.google <query>', example: '.google latest AI news 2025' },
+  wiki:         { category: 'Search', desc: 'Search Wikipedia for any topic.', usage: '.wiki <topic>', example: '.wiki Elon Musk' },
+  define:       { category: 'Search', desc: 'Dictionary definition of any word.', usage: '.define <word>', example: '.define serendipity' },
+  news:         { category: 'Search', desc: 'Latest news headlines on any topic.', usage: '.news [topic]', example: '.news Nigeria', note: 'Defaults to Nigeria/Africa news if no topic given.' },
+  weather:      { category: 'Search', desc: 'Current weather and tomorrow forecast for any city.', usage: '.weather <city>', example: '.weather Lagos' },
+  imgsearch:    { category: 'Search', desc: 'Generate an AI image from a search query.', usage: '.imgsearch <query>', example: '.imgsearch sunset beach Nigeria' },
+  imdb:         { category: 'Search', desc: 'Movie or TV series info from IMDB/OMDB.', usage: '.imdb <title>', example: '.imdb Breaking Bad' },
+  lyrics:       { category: 'Search', desc: 'Get song lyrics by song name or artist.', usage: '.lyrics <song> [- artist]', example: '.lyrics Essence - Wizkid' },
+  gsmarena:     { category: 'Search', desc: 'Phone specs lookup from GSMArena.', usage: '.gsmarena <phone name>', example: '.gsmarena iPhone 15 Pro' },
+  ytsearch:     { category: 'Search', desc: 'Search YouTube and get top video results with links.', usage: '.ytsearch <query>', example: '.ytsearch Burna Boy live concert 2025' },
+  bing:         { category: 'Search', desc: 'Bing/DuckDuckGo search results.', usage: '.bing <query>', example: '.bing best phones under 50k naira' },
+  bible:        { category: 'Search', desc: 'Look up a Bible verse or get a random one.', usage: '.bible [reference]', example: '.bible John 3:16', note: 'Use just .bible for a random verse' },
+  quran:        { category: 'Search', desc: 'Look up a Quran verse (Arabic + English translation).', usage: '.quran [surah:ayah]', example: '.quran 2:255', note: 'Use just .quran for a random verse. Also try surah names like .quran Al-Fatiha' },
+  cryptoprice:  { category: 'Search', desc: 'Live crypto price in USD and NGN.', usage: '.cryptoprice <coin>', example: '.cryptoprice bitcoin', note: 'Also try: ethereum, solana, dogecoin, bnb' },
+  ipinfo:       { category: 'Search', desc: 'IP address geolocation and ISP info.', usage: '.ipinfo [IP address]', example: '.ipinfo 8.8.8.8', note: 'Leave blank to check the server IP' },
+  whois:        { category: 'Search', desc: 'Domain WHOIS lookup — registrar, dates, nameservers.', usage: '.whois <domain>', example: '.whois google.com' },
+  dnslookup:    { category: 'Search', desc: 'DNS record lookup for any domain (A, MX, NS, TXT).', usage: '.dnslookup <domain>', example: '.dnslookup facebook.com' },
+
+  // ── PHOTO STYLES ──────────────────────────────────────────────────────────
+  toghibli:     { category: 'Photo Styles', desc: 'Convert photo to Studio Ghibli anime style.', usage: 'Reply to image + .toghibli' },
+  toanime:      { category: 'Photo Styles', desc: 'Convert photo to anime illustration style.', usage: 'Reply to image + .toanime' },
+  tocartoon:    { category: 'Photo Styles', desc: 'Convert photo to cartoon/comic style.', usage: 'Reply to image + .tocartoon' },
+  todisney:     { category: 'Photo Styles', desc: 'Convert photo to Disney character style.', usage: 'Reply to image + .todisney' },
+  tocyberpunk:  { category: 'Photo Styles', desc: 'Convert photo to cyberpunk neon style.', usage: 'Reply to image + .tocyberpunk' },
+  tocomic:      { category: 'Photo Styles', desc: 'Convert photo to Marvel/DC comic book style.', usage: 'Reply to image + .tocomic' },
+  togta:        { category: 'Photo Styles', desc: 'Convert photo to GTA V loading screen art style.', usage: 'Reply to image + .togta' },
+  tomanga:      { category: 'Photo Styles', desc: 'Convert photo to black and white manga style.', usage: 'Reply to image + .tomanga' },
+  topixar:      { category: 'Photo Styles', desc: 'Convert photo to Pixar 3D movie character style.', usage: 'Reply to image + .topixar' },
+  tooilpainting:{ category: 'Photo Styles', desc: 'Convert photo to classic oil painting style.', usage: 'Reply to image + .tooilpainting' },
+  tosketch:     { category: 'Photo Styles', desc: 'Convert photo to detailed pencil sketch.', usage: 'Reply to image + .tosketch' },
+  tovintage:    { category: 'Photo Styles', desc: 'Convert photo to vintage/retro photo style.', usage: 'Reply to image + .tovintage' },
+  towatercolor: { category: 'Photo Styles', desc: 'Convert photo to watercolor painting style.', usage: 'Reply to image + .towatercolor' },
+
+  // ── PHOTO EFFECTS ─────────────────────────────────────────────────────────
+  zombie:       { category: 'Photo Effects', desc: 'Apply zombie horror effect to a photo.', usage: 'Reply to image + .zombie' },
+  oldage:       { category: 'Photo Effects', desc: 'Age progression — see what someone looks like at 70+.', usage: 'Reply to image + .oldage' },
+  spirit:       { category: 'Photo Effects', desc: 'Apply ethereal spirit/ghost aura effect.', usage: 'Reply to image + .spirit' },
+  satan:        { category: 'Photo Effects', desc: 'Apply dark demonic horror edit.', usage: 'Reply to image + .satan' },
+  punk:         { category: 'Photo Effects', desc: 'Apply punk rock aesthetic style.', usage: 'Reply to image + .punk' },
+  hijab:        { category: 'Photo Effects', desc: 'AI hijab overlay on a photo.', usage: 'Reply to image + .hijab' },
+  wanted:       { category: 'Photo Effects', desc: 'Wild West wanted poster effect.', usage: 'Reply to image + .wanted' },
+  drip:         { category: 'Photo Effects', desc: 'Dripping paint art effect.', usage: 'Reply to image + .drip' },
+  joker:        { category: 'Photo Effects', desc: 'Joker villain makeup effect.', usage: 'Reply to image + .joker' },
+  polaroid:     { category: 'Photo Effects', desc: 'Vintage polaroid frame effect.', usage: 'Reply to image + .polaroid' },
+  gun:          { category: 'Photo Effects', desc: 'Holding gun action movie effect.', usage: 'Reply to image + .gun' },
+  clown:        { category: 'Photo Effects', desc: 'Clown face paint makeup overlay.', usage: 'Reply to image + .clown' },
+  mirror:       { category: 'Photo Effects', desc: 'Mirror/symmetrical reflection effect.', usage: 'Reply to image + .mirror' },
+  partner:      { category: 'Photo Effects', desc: 'Romantic couple collage effect.', usage: 'Reply to image + .partner' },
+  nanobanana:   { category: 'Photo Effects', desc: 'Creative AI art style — provide your own prompt.', usage: 'Reply to image + .nanobanana [style prompt]', example: '.nanobanana cyberpunk warrior' },
+
+  // ── TOOLS (new) ───────────────────────────────────────────────────────────
+  sendstatus:   {
+    category: 'Tools',
+    desc: 'Post any message (text/image/video/audio) as your WhatsApp status.',
+    usage: `Reply to a message + .sendstatus  OR  .sendstatus <text>`,
+    example: '.sendstatus Just woke up and chose chaos 🔥',
+    note: 'Videos must be ≤30 seconds. Status is visible to your WA contacts.',
+  },
+  sensitivity:  {
+    category: 'Tools',
+    desc: 'Calculate optimized gaming sensitivity for Free Fire or CODM based on your device.',
+    usage: '.sensitivity <ff|codm> <device name> [| play_style | experience]',
+    example: '.sensitivity ff iPhone X\n.sensitivity codm Samsung Galaxy S22 | 4fingers\n.sensitivity ff Tecno Spark 10 | aggressive | advanced',
+    note: 'Play styles: aggressive, rusher, precise, sniper, balanced, versatile, defensive\nExperience: beginner, intermediate, advanced, professional, expert',
+  },
 }
 
 const getCategories = () => {
