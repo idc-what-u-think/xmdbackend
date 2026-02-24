@@ -9,7 +9,7 @@ const HELP = {
     category: 'Tools / Fake',
     desc: 'Generate a realistic fake OPay transaction receipt.',
     usage: '.opay <amount> | <receiver name> | <receiver bank> | <receiver account> | <sender name> | <sender bank>',
-    example: '.opay 1650 | JAYWONULTIMATE ENTERPRISES | MONIE POINT | 8253381685 | RAMAT OYINLOLA YAHAYA | OPay',
+    example: '.opay 1650 | Firekid846 | MONIE POINT | 1234567890 | Firekid | OPay',
     note: 'For entertainment purposes only.',
   },
   fakecall: {
