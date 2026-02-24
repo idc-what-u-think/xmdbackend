@@ -53,7 +53,44 @@ export default [
     command: 'autoreact',
     aliases: ['autoemoji'],
     ownerOnly: true,
-    handler: makeToggle('autoreact', 'Auto-React', '😄')
+    handler: async (sock, msg, ctx, { api }) => {
+      const input = ctx.query?.trim()
+      
+      if (!input) {
+        const r = await api.sessionGet('autoreact')
+        const cur = r?.value || 'off'
+        return sock.sendMessage(ctx.from, {
+          text: `*Auto-React to Commands*\n\nCurrent: ${cur === 'off' ? '*OFF*' : `*ON* (${cur})`}\n\n*Usage:*\n  ${ctx.prefix}autoreact on <emoji> - Enable with emoji\n  ${ctx.prefix}autoreact off - Disable\n\n*Examples:*\n  ${ctx.prefix}autoreact on 🔥\n  ${ctx.prefix}autoreact on ✅\n  ${ctx.prefix}autoreact off\n\n_Reacts to command messages before sending response_`
+        }, { quoted: msg })
+      }
+      
+      const [action, ...rest] = input.split(' ')
+      
+      if (action.toLowerCase() === 'off') {
+        await api.sessionSet('autoreact', 'off')
+        return sock.sendMessage(ctx.from, { 
+          text: '✅ *Auto-React* turned *OFF*' 
+        }, { quoted: msg })
+      }
+      
+      if (action.toLowerCase() === 'on') {
+        const emoji = rest.join(' ') || '✅'
+        // Validate emoji (basic check)
+        if (emoji.length > 10) {
+          return sock.sendMessage(ctx.from, { 
+            text: '❌ Invalid emoji. Please use a single emoji.' 
+          }, { quoted: msg })
+        }
+        await api.sessionSet('autoreact', emoji)
+        return sock.sendMessage(ctx.from, { 
+          text: `✅ *Auto-React* turned *ON*\nEmoji: ${emoji}\n\n_Will react to all commands with ${emoji}_` 
+        }, { quoted: msg })
+      }
+      
+      return sock.sendMessage(ctx.from, { 
+        text: `❌ Invalid action. Use:\n  ${ctx.prefix}autoreact on <emoji>\n  ${ctx.prefix}autoreact off` 
+      }, { quoted: msg })
+    }
   },
   {
     command: 'autoforward',
