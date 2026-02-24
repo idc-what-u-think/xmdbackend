@@ -38,7 +38,7 @@ let _cobaltCacheTs        = 0
 const COBALT_CACHE_TTL    = 30 * 60 * 1000  // 30 min
 
 // Hardcoded fallback instances (no turnstile, no api key required)
-// Updated Feb 2026 — verified working from instances.cobalt.best
+// Updated Feb 2026 — verified working instances
 const COBALT_FALLBACK = [
   'https://cobalt.api.lostdusty.workers.dev',
   'https://cobalt.nadeko.net',
@@ -46,6 +46,10 @@ const COBALT_FALLBACK = [
   'https://cobalt.ggtyler.dev',
   'https://cobalt-api.hyper.lol',
   'https://cobalt.private.coffee',
+  'https://api.cobalt.tools',
+  'https://cobalt-api.kwiatekmiki.com',
+  'https://cobalt.meowgi.ru',
+  'https://cobalt-api.jl1.dev',
 ]
 
 // Fetch live list and return up to 6 no-auth online instances
@@ -371,6 +375,41 @@ async function gdriveDownload(url) {
   const fname = cd.match(/filename[^;=\n]*=([^;\n]*)/)?.[1]?.replace(/['"]/g, '').trim() || `gdrive_${fileId}`
   const mime  = (res.headers.get('content-type') || 'application/octet-stream').split(';')[0].trim()
   return { buf, fname, mime }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// MEDIAFIRE — free file hosting (no auth for public files)
+// Method: scrape download page for direct link
+// ─────────────────────────────────────────────────────────────────────
+
+async function mediafireDownload(url) {
+  // Fetch the MediaFire page
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/121 Safari/537.36',
+    },
+    signal: AbortSignal.timeout(15_000),
+  })
+  if (!res.ok) throw new Error(`MediaFire returned ${res.status}. Is the file public?`)
+  
+  const html = await res.text()
+  
+  // Extract download link from page HTML
+  // MediaFire uses: <a href="..." class="input popsok" id="downloadButton">
+  const dlMatch = html.match(/href="(https:\/\/download\d+\.mediafire\.com[^"]+)"/)
+  if (!dlMatch) throw new Error('Could not find download link. Make sure the file is public.')
+  
+  const downloadUrl = dlMatch[1]
+  
+  // Extract filename from page title or download button
+  const nameMatch = html.match(/<title>([^<]+)<\/title>/) || html.match(/aria-label="Download file named ([^"]+)"/)
+  const filename = nameMatch ? nameMatch[1].replace(' - MediaFire', '').trim() : 'mediafire_file'
+  
+  // Extract file size if available
+  const sizeMatch = html.match(/File size:<\/span>\s*<span[^>]*>([^<]+)<\/span>/)
+  const fileSize = sizeMatch ? sizeMatch[1].trim() : 'Unknown'
+  
+  return { downloadUrl, filename, fileSize }
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -853,6 +892,58 @@ export default [
 
       } catch (err) {
         await editPlaceholder(sock, ph, `❌ Google Drive download failed: ${err.message}`)
+      }
+    },
+  },
+
+  // ─────────────────────────────────────────────────────────────────
+  // MediaFire — free file hosting (APKs, ZIPs, MP3s, documents, etc.)
+  // Free: scrape public download page for direct link
+  // ─────────────────────────────────────────────────────────────────
+  {
+    command:  'mediafire',
+    aliases:  ['mf', 'mfdl', 'mfdownload'],
+    category: 'downloader',
+    handler:  async (sock, msg, ctx) => {
+      const url = ctx.query?.trim()
+      if (!url?.includes('mediafire.com')) return sock.sendMessage(ctx.from, {
+        text: `❌ *Usage:* ${ctx.prefix}mediafire <MediaFire link>\n\n*Example:*\n${ctx.prefix}mediafire https://www.mediafire.com/file/xxxxx\n\n_File must be public_`
+      }, { quoted: msg })
+
+      const ph = await placeholder(sock, ctx, msg, '📁 Fetching MediaFire file...')
+
+      try {
+        const { downloadUrl, filename, fileSize } = await mediafireDownload(url)
+        
+        await editPlaceholder(sock, ph, `📁 Downloading: *${filename}* (${fileSize})...`)
+        
+        const buf = await toBuffer(downloadUrl, 'file')
+        checkSize(buf, MAX_VIDEO_MB, 'File')
+
+        const mime = (filename.match(/\.(apk|zip|rar|pdf|docx|xlsx|mp3|mp4|jpg|png)$/i))?.[1] || 'bin'
+        const mimeMap = {
+          apk: 'application/vnd.android.package-archive',
+          zip: 'application/zip',
+          rar: 'application/x-rar-compressed',
+          pdf: 'application/pdf',
+          docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          mp3: 'audio/mpeg',
+          mp4: 'video/mp4',
+          jpg: 'image/jpeg',
+          png: 'image/png',
+        }
+
+        await deletePlaceholder(sock, ph)
+        await sock.sendMessage(ctx.from, {
+          document: buf,
+          fileName: filename,
+          mimetype: mimeMap[mime] || 'application/octet-stream',
+          caption:  `📁 *${filename}*\n📦 ${(buf.length / MB).toFixed(2)} MB\n\n_Downloaded via Firekid XMD_`,
+        }, { quoted: msg })
+
+      } catch (err) {
+        await editPlaceholder(sock, ph, `❌ MediaFire download failed: ${err.message}\n\n_Make sure the file is public and the link is valid_`)
       }
     },
   },
