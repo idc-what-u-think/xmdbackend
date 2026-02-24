@@ -38,7 +38,7 @@ const callGroq = async (apiKey, model, systemPrompt, userMessage, maxTokens = 10
 // Call Gemini API
 const callGemini = async (apiKey, prompt, maxTokens = 1024) => {
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
     {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -177,7 +177,7 @@ export default [
       const input = ctx.query || (ctx.quoted ? ctx.quotedBody : '')
       if (!input) {
         return sock.sendMessage(ctx.from, {
-          text: `✨ *Google Gemini AI*\n\nPowered by Gemini 1.5 Flash.\n📌 *Usage:* ${ctx.prefix}gemini <your message>`
+          text: `✨ *Google Gemini AI*\n\nPowered by Gemini 2.5 Flash.\n📌 *Usage:* ${ctx.prefix}gemini <your message>`
         }, { quoted: msg })
       }
 
