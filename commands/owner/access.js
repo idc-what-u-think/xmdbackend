@@ -1,4 +1,7 @@
+import { addBlockMemory, delBlockMemory, setBlockMemory } from '../../src/lib/handler.js'
+
 export default [
+  // ── block ─────────────────────────────────────────────────────────────────
   {
     command: 'block',
     aliases: ['botblock'],
@@ -6,22 +9,46 @@ export default [
     sudoOnly: true,
     handler: async (sock, msg, ctx, { api }) => {
       const targetJid = ctx.mentionedJids[0] || ctx.quotedSender
-      if (!targetJid) return sock.sendMessage(ctx.from, { text: `❌ Tag or reply to the user.\n📌 *Usage:* ${ctx.prefix}block @user` }, { quoted: msg })
-      if (targetJid === ctx.sender) return sock.sendMessage(ctx.from, { text: '❌ Cannot block yourself.' }, { quoted: msg })
+      if (!targetJid) return sock.sendMessage(ctx.from, {
+        text: `❌ Tag or reply to the user.\n📌 *Usage:* ${ctx.prefix}block @user`
+      }, { quoted: msg })
+      if (targetJid === ctx.sender) return sock.sendMessage(ctx.from, {
+        text: '❌ Cannot block yourself.'
+      }, { quoted: msg })
+
+      const normalised = targetJid.split('@')[0].replace(/\D/g, '') + '@s.whatsapp.net'
 
       const res = await api.sessionGet('block_list')
       const blockList = res?.value ? JSON.parse(res.value) : []
-      if (blockList.includes(targetJid)) return sock.sendMessage(ctx.from, { text: `⚠️ @${targetJid.split('@')[0]} is already blocked.`, mentions: [targetJid] }, { quoted: msg })
 
-      blockList.push(targetJid)
-      await api.sessionSet('block_list', JSON.stringify(blockList))
+      if (blockList.includes(normalised) || blockList.includes(targetJid))
+        return sock.sendMessage(ctx.from, {
+          text: `⚠️ @${targetJid.split('@')[0]} is already blocked.`,
+          mentions: [targetJid]
+        }, { quoted: msg })
+
+      blockList.push(normalised)
+
+      // Update memory FIRST — takes effect immediately for all new messages
+      addBlockMemory(normalised)
+      addBlockMemory(targetJid)   // also block original JID form
+
+      // Persist to KV in background
+      api.sessionSet('block_list', JSON.stringify(blockList)).catch(() => {})
+
       await sock.sendMessage(ctx.from, {
-        text: [`🚫 *User Blocked*`, ``, `@${targetJid.split('@')[0]} can no longer use the bot.`, `_Blocked users: ${blockList.length}_`, ``, `_Use ${ctx.prefix}unblock to restore access_`].join('\n'),
+        text: [
+          `🚫 *User Blocked*`, ``,
+          `@${targetJid.split('@')[0]} can no longer use the bot.`,
+          `_Blocked users: ${blockList.length}_`, ``,
+          `_Use ${ctx.prefix}unblock to restore access_`
+        ].join('\n'),
         mentions: [targetJid]
       }, { quoted: msg })
     }
   },
 
+  // ── unblock ───────────────────────────────────────────────────────────────
   {
     command: 'unblock',
     aliases: ['botunblock'],
@@ -29,18 +56,38 @@ export default [
     sudoOnly: true,
     handler: async (sock, msg, ctx, { api }) => {
       const targetJid = ctx.mentionedJids[0] || ctx.quotedSender
-      if (!targetJid) return sock.sendMessage(ctx.from, { text: `❌ Tag or reply to the user.\n📌 *Usage:* ${ctx.prefix}unblock @user` }, { quoted: msg })
+      if (!targetJid) return sock.sendMessage(ctx.from, {
+        text: `❌ Tag or reply to the user.\n📌 *Usage:* ${ctx.prefix}unblock @user`
+      }, { quoted: msg })
+
+      const normalised = targetJid.split('@')[0].replace(/\D/g, '') + '@s.whatsapp.net'
 
       const res = await api.sessionGet('block_list')
-      const blockList = res?.value ? JSON.parse(res.value) : []
-      if (!blockList.includes(targetJid)) return sock.sendMessage(ctx.from, { text: `❌ @${targetJid.split('@')[0]} is not blocked.`, mentions: [targetJid] }, { quoted: msg })
+      let blockList = res?.value ? JSON.parse(res.value) : []
 
-      const updated = blockList.filter(j => j !== targetJid)
-      await api.sessionSet('block_list', JSON.stringify(updated))
-      await sock.sendMessage(ctx.from, { text: `✅ @${targetJid.split('@')[0]} can now use the bot again.`, mentions: [targetJid] }, { quoted: msg })
+      if (!blockList.includes(normalised) && !blockList.includes(targetJid))
+        return sock.sendMessage(ctx.from, {
+          text: `❌ @${targetJid.split('@')[0]} is not blocked.`,
+          mentions: [targetJid]
+        }, { quoted: msg })
+
+      blockList = blockList.filter(j => j !== normalised && j !== targetJid)
+
+      // Update memory FIRST
+      delBlockMemory(normalised)
+      delBlockMemory(targetJid)
+
+      // Persist to KV
+      api.sessionSet('block_list', JSON.stringify(blockList)).catch(() => {})
+
+      await sock.sendMessage(ctx.from, {
+        text: `✅ @${targetJid.split('@')[0]} can now use the bot again.`,
+        mentions: [targetJid]
+      }, { quoted: msg })
     }
   },
 
+  // ── listblock ─────────────────────────────────────────────────────────────
   {
     command: 'listblock',
     aliases: ['blocklist', 'blocked'],
@@ -49,17 +96,76 @@ export default [
     handler: async (sock, msg, ctx, { api }) => {
       const res = await api.sessionGet('block_list')
       const blockList = res?.value ? JSON.parse(res.value) : []
-      if (!blockList.length) return sock.sendMessage(ctx.from, { text: `🚫 *Block List — Empty*\n\nNo users are blocked.` }, { quoted: msg })
+
+      if (!blockList.length) return sock.sendMessage(ctx.from, {
+        text: `🚫 *Block List — Empty*\n\nNo users are blocked.`
+      }, { quoted: msg })
 
       const lines = blockList.map((jid, i) => `${i + 1}. @${jid.split('@')[0]}`)
       await sock.sendMessage(ctx.from, {
-        text: [`🚫 *Blocked Users (${blockList.length})*`, `${'─'.repeat(26)}`, ``, ...lines, ``, `_Unblock with ${ctx.prefix}unblock @user_`].join('\n'),
+        text: [
+          `🚫 *Blocked Users (${blockList.length})*`, `${'─'.repeat(26)}`, ``,
+          ...lines, ``,
+          `_Unblock with ${ctx.prefix}unblock @user_`
+        ].join('\n'),
         mentions: blockList
       }, { quoted: msg })
     }
   },
 
-  // ── ban — now writes plan: 'banned' to D1 ────────────────────────────────
+  // ── premium ───────────────────────────────────────────────────────────────
+  {
+    command: 'premium',
+    aliases: ['addpremium', 'vip'],
+    category: 'owner',
+    ownerOnly: true,
+    handler: async (sock, msg, ctx, { api }) => {
+      const targetJid = ctx.mentionedJids[0] || ctx.quotedSender
+      if (!targetJid) return sock.sendMessage(ctx.from, {
+        text: `❌ Tag or reply to the user.\n📌 *Usage:* ${ctx.prefix}premium @user`
+      }, { quoted: msg })
+
+      const normalised = targetJid.split('@')[0].replace(/\D/g, '') + '@s.whatsapp.net'
+      const res = await api.setPlan(normalised, 'premium')
+      if (!res?.ok) return sock.sendMessage(ctx.from, {
+        text: `❌ Failed to grant premium. Error: ${res?.error || 'unknown'}`
+      }, { quoted: msg })
+
+      try { await sock.sendMessage(normalised, { text: `⭐ You have been granted *Premium* access to the bot!\n\nEnjoy all premium features.` }) } catch {}
+
+      await sock.sendMessage(ctx.from, {
+        text: `⭐ @${targetJid.split('@')[0]} has been granted Premium access.`,
+        mentions: [targetJid]
+      }, { quoted: msg })
+    }
+  },
+
+  // ── delpremium ────────────────────────────────────────────────────────────
+  {
+    command: 'delpremium',
+    aliases: ['removepremium', 'delvip'],
+    category: 'owner',
+    ownerOnly: true,
+    handler: async (sock, msg, ctx, { api }) => {
+      const targetJid = ctx.mentionedJids[0] || ctx.quotedSender
+      if (!targetJid) return sock.sendMessage(ctx.from, {
+        text: `❌ Tag or reply to the user.\n📌 *Usage:* ${ctx.prefix}delpremium @user`
+      }, { quoted: msg })
+
+      const normalised = targetJid.split('@')[0].replace(/\D/g, '') + '@s.whatsapp.net'
+      const res = await api.setPlan(normalised, 'free')
+      if (!res?.ok) return sock.sendMessage(ctx.from, {
+        text: `❌ Failed to remove premium. Error: ${res?.error || 'unknown'}`
+      }, { quoted: msg })
+
+      await sock.sendMessage(ctx.from, {
+        text: `✅ @${targetJid.split('@')[0]} has been removed from Premium.`,
+        mentions: [targetJid]
+      }, { quoted: msg })
+    }
+  },
+
+  // ── ban ───────────────────────────────────────────────────────────────────
   {
     command: 'ban',
     aliases: ['globalban', 'botban'],
@@ -67,18 +173,18 @@ export default [
     ownerOnly: true,
     handler: async (sock, msg, ctx, { api }) => {
       const targetJid = ctx.mentionedJids[0] || ctx.quotedSender
-      if (!targetJid) return sock.sendMessage(ctx.from, { text: `❌ Tag or reply to the user.\n📌 *Usage:* ${ctx.prefix}ban @user [reason]` }, { quoted: msg })
+      if (!targetJid) return sock.sendMessage(ctx.from, {
+        text: `❌ Tag or reply to the user.\n📌 *Usage:* ${ctx.prefix}ban @user [reason]`
+      }, { quoted: msg })
 
       const reason = ctx.args.filter(a => !a.startsWith('@')).join(' ').trim() || 'No reason given'
       const normalised = targetJid.split('@')[0].replace(/\D/g, '') + '@s.whatsapp.net'
 
-      // Write banned plan to D1 — handler.js checks plan === 'banned'
       const planRes = await api.setPlan(normalised, 'banned')
-      if (!planRes?.ok) {
-        return sock.sendMessage(ctx.from, { text: `❌ Failed to ban user. Worker error: ${planRes?.error || 'unknown'}` }, { quoted: msg })
-      }
+      if (!planRes?.ok) return sock.sendMessage(ctx.from, {
+        text: `❌ Failed to ban user. Error: ${planRes?.error || 'unknown'}`
+      }, { quoted: msg })
 
-      // Also keep display list for banlist command
       const res = await api.sessionGet('ban_list')
       const banList = res?.value ? JSON.parse(res.value) : []
       if (!banList.find(b => b.jid === normalised)) {
@@ -89,13 +195,19 @@ export default [
       try { await sock.sendMessage(targetJid, { text: `🚨 *You have been BANNED from the bot.*\n\nReason: _${reason}_\n\nContact the owner if you believe this is a mistake.` }) } catch {}
 
       await sock.sendMessage(ctx.from, {
-        text: [`🚨 *User Banned*`, ``, `👤 @${targetJid.split('@')[0]}`, `📝 Reason: _${reason}_`, ``, `They have been notified.`, `_Total bans: ${banList.length}_`].join('\n'),
+        text: [
+          `🚨 *User Banned*`, ``,
+          `👤 @${targetJid.split('@')[0]}`,
+          `📝 Reason: _${reason}_`, ``,
+          `They have been notified.`,
+          `_Total bans: ${banList.length}_`
+        ].join('\n'),
         mentions: [targetJid]
       }, { quoted: msg })
     }
   },
 
-  // ── unban — sets plan back to 'free' in D1 ───────────────────────────────
+  // ── unban ─────────────────────────────────────────────────────────────────
   {
     command: 'unban',
     aliases: ['globalunban'],
@@ -103,26 +215,31 @@ export default [
     ownerOnly: true,
     handler: async (sock, msg, ctx, { api }) => {
       const targetJid = ctx.mentionedJids[0] || ctx.quotedSender
-      if (!targetJid) return sock.sendMessage(ctx.from, { text: `❌ Tag or reply to the user.\n📌 *Usage:* ${ctx.prefix}unban @user` }, { quoted: msg })
+      if (!targetJid) return sock.sendMessage(ctx.from, {
+        text: `❌ Tag or reply to the user.\n📌 *Usage:* ${ctx.prefix}unban @user`
+      }, { quoted: msg })
 
       const normalised = targetJid.split('@')[0].replace(/\D/g, '') + '@s.whatsapp.net'
-
       const planRes = await api.setPlan(normalised, 'free')
-      if (!planRes?.ok) {
-        return sock.sendMessage(ctx.from, { text: `❌ Failed to unban user. Worker error: ${planRes?.error || 'unknown'}` }, { quoted: msg })
-      }
+      if (!planRes?.ok) return sock.sendMessage(ctx.from, {
+        text: `❌ Failed to unban user. Error: ${planRes?.error || 'unknown'}`
+      }, { quoted: msg })
 
       const res = await api.sessionGet('ban_list')
       const banList = res?.value ? JSON.parse(res.value) : []
       const updated = banList.filter(b => b.jid !== normalised)
       await api.sessionSet('ban_list', JSON.stringify(updated))
 
-      try { await sock.sendMessage(targetJid, { text: `✅ Your ban has been lifted. You can use the bot again!` }) } catch {}
+      try { await sock.sendMessage(normalised, { text: `✅ Your ban has been lifted. You can use the bot again!` }) } catch {}
 
-      await sock.sendMessage(ctx.from, { text: `✅ @${targetJid.split('@')[0]} has been unbanned.`, mentions: [targetJid] }, { quoted: msg })
+      await sock.sendMessage(ctx.from, {
+        text: `✅ @${targetJid.split('@')[0]} has been unbanned.`,
+        mentions: [targetJid]
+      }, { quoted: msg })
     }
   },
 
+  // ── banlist ───────────────────────────────────────────────────────────────
   {
     command: 'banlist',
     aliases: ['listban', 'bans'],
@@ -131,7 +248,10 @@ export default [
     handler: async (sock, msg, ctx, { api }) => {
       const res = await api.sessionGet('ban_list')
       const banList = res?.value ? JSON.parse(res.value) : []
-      if (!banList.length) return sock.sendMessage(ctx.from, { text: `🚨 *Ban List — Empty*\n\nNo users are currently banned.` }, { quoted: msg })
+
+      if (!banList.length) return sock.sendMessage(ctx.from, {
+        text: `🚨 *Ban List — Empty*\n\nNo users are currently banned.`
+      }, { quoted: msg })
 
       const lines = banList.map((b, i) => {
         const num = (b.jid || '').split('@')[0]
@@ -140,9 +260,13 @@ export default [
       })
 
       await sock.sendMessage(ctx.from, {
-        text: [`🚨 *Banned Users (${banList.length})*`, `${'─'.repeat(28)}`, ``, ...lines, ``, `_Unban with ${ctx.prefix}unban @user_`].join('\n'),
+        text: [
+          `🚨 *Banned Users (${banList.length})*`, `${'─'.repeat(28)}`, ``,
+          ...lines, ``,
+          `_Unban with ${ctx.prefix}unban @user_`
+        ].join('\n'),
         mentions: banList.map(b => b.jid).filter(Boolean)
       }, { quoted: msg })
     }
-  }
+  },
 ]
