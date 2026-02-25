@@ -1,8 +1,24 @@
 // commands/search/lookup1.js
-// Google search, Wikipedia, Dictionary, News, Weather
-// All free endpoints — no API keys needed
+// Google search, Wikipedia, Dictionary, News, Weather, Image Search
+// Weather: Open-Meteo (free, no key) | ImgSearch: Lexica.art (free, no key)
 
 const DIVIDER = '─'.repeat(28)
+
+// WMO weather code → [emoji, label]
+const WMO = {
+  0: ['☀️', 'Clear sky'],
+  1: ['🌤️', 'Mainly clear'], 2: ['⛅', 'Partly cloudy'], 3: ['☁️', 'Overcast'],
+  45: ['🌫️', 'Foggy'], 48: ['🌫️', 'Icy fog'],
+  51: ['🌦️', 'Light drizzle'], 53: ['🌦️', 'Moderate drizzle'], 55: ['🌧️', 'Dense drizzle'],
+  61: ['🌧️', 'Slight rain'], 63: ['🌧️', 'Moderate rain'], 65: ['🌧️', 'Heavy rain'],
+  71: ['❄️', 'Slight snow'], 73: ['❄️', 'Moderate snow'], 75: ['❄️', 'Heavy snow'],
+  77: ['🌨️', 'Snow grains'],
+  80: ['🌦️', 'Slight showers'], 81: ['🌧️', 'Moderate showers'], 82: ['⛈️', 'Violent showers'],
+  85: ['🌨️', 'Slight snow showers'], 86: ['❄️', 'Heavy snow showers'],
+  95: ['⛈️', 'Thunderstorm'], 96: ['⛈️', 'Thunderstorm w/ hail'], 99: ['⛈️', 'Severe thunderstorm'],
+}
+const wmo = (code) => WMO[code] || ['🌡️', 'Unknown']
+const windDir = (deg) => ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round((deg ?? 0) / 45) % 8]
 
 export default [
 
@@ -20,17 +36,13 @@ export default [
       const ph = await sock.sendMessage(ctx.from, { text: `🔍 Searching Google...` }, { quoted: msg })
 
       try {
-        // DuckDuckGo instant answers API (free, no key, privacy-safe)
         const res = await fetch(
           `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_redirect=1&no_html=1&skip_disambig=1`,
           { headers: { 'User-Agent': 'FirekidXMD/1.0' }, signal: AbortSignal.timeout(10_000) }
         )
         const data = await res.json()
 
-        const lines = [
-          `🔍 *Google Search: ${query}*`,
-          DIVIDER, ``,
-        ]
+        const lines = [`🔍 *Google Search: ${query}*`, DIVIDER, ``]
 
         if (data.AbstractText) {
           lines.push(`📖 *Summary:*`, data.AbstractText)
@@ -38,7 +50,6 @@ export default [
           lines.push(``)
         }
 
-        // Related topics
         const topics = (data.RelatedTopics || []).slice(0, 5)
         if (topics.length) {
           lines.push(`📌 *Related:*`)
@@ -48,7 +59,6 @@ export default [
           lines.push(``)
         }
 
-        // Infobox
         if (data.Infobox?.content?.length) {
           lines.push(`ℹ️ *Info:*`)
           data.Infobox.content.slice(0, 4).forEach(c => {
@@ -84,7 +94,6 @@ export default [
       const ph = await sock.sendMessage(ctx.from, { text: `📖 Searching Wikipedia...` }, { quoted: msg })
 
       try {
-        // Wikipedia REST API — free, no key
         const searchRes = await fetch(
           `https://en.wikipedia.org/w/api.php?action=search&list=search&srsearch=${encodeURIComponent(query)}&format=json&srlimit=1`,
           { signal: AbortSignal.timeout(10_000) }
@@ -127,7 +136,6 @@ export default [
       const ph = await sock.sendMessage(ctx.from, { text: `📚 Looking up _${word}_...` }, { quoted: msg })
 
       try {
-        // Free Dictionary API — no key needed
         const res = await fetch(
           `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`,
           { signal: AbortSignal.timeout(10_000) }
@@ -135,11 +143,7 @@ export default [
         if (!res.ok) throw new Error(`Word not found: ${word}`)
         const [entry] = await res.json()
 
-        const lines = [
-          `📚 *${entry.word}*`,
-          DIVIDER,
-        ]
-
+        const lines = [`📚 *${entry.word}*`, DIVIDER]
         if (entry.phonetics?.[0]?.text) lines.push(`🔤 Pronunciation: _${entry.phonetics[0].text}_`)
         lines.push(``)
 
@@ -167,12 +171,9 @@ export default [
     category: 'search',
     handler: async (sock, msg, ctx, { api }) => {
       const query = ctx.query?.trim() || 'Nigeria'
-
       const ph = await sock.sendMessage(ctx.from, { text: `📰 Fetching news about _${query}_...` }, { quoted: msg })
 
       try {
-        // GNews API — free tier 100 req/day, no key needed for RSS
-        // Using BBC RSS as primary (always free)
         const rssUrl = query.toLowerCase() === 'nigeria' || query.toLowerCase() === 'naija'
           ? `https://feeds.bbci.co.uk/news/world/africa/rss.xml`
           : `https://feeds.bbci.co.uk/news/rss.xml?edition=int`
@@ -184,7 +185,6 @@ export default [
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const xml = await res.text()
 
-        // Parse RSS items with regex (no xml parser needed)
         const items = [...xml.matchAll(/<item>[\s\S]*?<\/item>/g)].slice(0, 8)
         if (!items.length) throw new Error('No news items in feed')
 
@@ -193,7 +193,6 @@ export default [
         for (const [i, item] of items.entries()) {
           const title = item[0].match(/<title><!\[CDATA\[(.*?)\]\]><\/title>|<title>(.*?)<\/title>/)?.[1] || item[0].match(/<title>(.*?)<\/title>/)?.[1] || 'No title'
           const pubDate = item[0].match(/<pubDate>(.*?)<\/pubDate>/)?.[1] || ''
-          const link = item[0].match(/<link>(.*?)<\/link>|<link[^>]*\/>/)?.[1] || ''
           const cleanTitle = title.replace(/<[^>]+>/g, '').trim()
           const cleanDate = pubDate ? new Date(pubDate).toLocaleString('en-GB', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''
 
@@ -210,7 +209,7 @@ export default [
     }
   },
 
-  // ── .weather ──────────────────────────────────────────────────────────────
+  // ── .weather (Open-Meteo — free, no API key needed) ───────────────────────
   {
     command: 'weather',
     aliases: ['wx', 'forecast', 'climate'],
@@ -220,69 +219,64 @@ export default [
       const ph = await sock.sendMessage(ctx.from, { text: `🌤️ Getting weather for _${city}_...` }, { quoted: msg })
 
       try {
-        // wttr.in — completely free, no auth, JSON format
-        const res = await fetch(
-          `https://wttr.in/${encodeURIComponent(city)}?format=j1`,
+        // Step 1: Geocode city → coordinates
+        const geoRes = await fetch(
+          `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`,
           { headers: { 'User-Agent': 'FirekidXMD/1.0' }, signal: AbortSignal.timeout(10_000) }
         )
-        if (!res.ok) throw new Error(`City not found: ${city}`)
-        const data = await res.json()
+        const geoData = await geoRes.json()
+        if (!geoData.results?.length) throw new Error(`City not found: ${city}`)
 
-        const cur = data.current_condition?.[0]
-        const nearest = data.nearest_area?.[0]
-        const areaName = nearest?.areaName?.[0]?.value || city
-        const country = nearest?.country?.[0]?.value || ''
-        const weather = cur?.weatherDesc?.[0]?.value || 'Unknown'
-        const tempC = cur?.temp_C || '?'
-        const feelsLike = cur?.FeelsLikeC || '?'
-        const humidity = cur?.humidity || '?'
-        const windKmph = cur?.windspeedKmph || '?'
-        const windDir = cur?.winddir16Point || '?'
-        const visibility = cur?.visibility || '?'
-        const uvIndex = cur?.uvIndex || '?'
-        const cloudcover = cur?.cloudcover || '?'
+        const { latitude, longitude, name: cityName, country, timezone, country_code } = geoData.results[0]
 
-        // Emoji for condition
-        const condLower = weather.toLowerCase()
-        const icon = condLower.includes('sun') || condLower.includes('clear') ? '☀️'
-          : condLower.includes('cloud') ? '☁️'
-          : condLower.includes('rain') ? '🌧️'
-          : condLower.includes('thunder') ? '⛈️'
-          : condLower.includes('snow') ? '❄️'
-          : condLower.includes('fog') || condLower.includes('mist') ? '🌫️'
-          : condLower.includes('wind') ? '💨' : '🌡️'
+        // Step 2: Fetch weather using coordinates
+        const wxRes = await fetch(
+          `https://api.open-meteo.com/v1/forecast` +
+          `?latitude=${latitude}&longitude=${longitude}` +
+          `&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m,visibility,uv_index,cloud_cover` +
+          `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max` +
+          `&timezone=${encodeURIComponent(timezone || 'auto')}&forecast_days=2&wind_speed_unit=kmh`,
+          { headers: { 'User-Agent': 'FirekidXMD/1.0' }, signal: AbortSignal.timeout(10_000) }
+        )
+        if (!wxRes.ok) throw new Error(`Weather API error: ${wxRes.status}`)
+        const wx = await wxRes.json()
+
+        const cur = wx.current
+        const [icon, condition] = wmo(cur.weather_code)
+        const dir = windDir(cur.wind_direction_10m)
 
         // Tomorrow forecast
-        const tomorrow = data.weather?.[1]
-        const tmwMaxC = tomorrow?.maxtempC || '?'
-        const tmwMinC = tomorrow?.mintempC || '?'
-        const tmwDesc = tomorrow?.hourly?.[4]?.weatherDesc?.[0]?.value || 'N/A'
+        const tmwCode = wx.daily?.weather_code?.[1]
+        const [tmwIcon, tmwCond] = wmo(tmwCode)
+        const tmwMax  = wx.daily?.temperature_2m_max?.[1]?.toFixed(1) ?? '?'
+        const tmwMin  = wx.daily?.temperature_2m_min?.[1]?.toFixed(1) ?? '?'
+        const tmwRain = wx.daily?.precipitation_probability_max?.[1] ?? '?'
 
         const text = [
-          `${icon} *Weather: ${areaName}${country ? ', ' + country : ''}*`,
+          `${icon} *Weather: ${cityName}${country ? ', ' + country : ''}*`,
           DIVIDER, ``,
-          `🌡️ Temperature:  *${tempC}°C* (Feels ${feelsLike}°C)`,
-          `⛅ Condition:    *${weather}*`,
-          `💧 Humidity:    *${humidity}%*`,
-          `💨 Wind:        *${windKmph} km/h ${windDir}*`,
-          `👁️  Visibility:  *${visibility} km*`,
-          `☁️  Cloud Cover: *${cloudcover}%*`,
-          `🔆 UV Index:    *${uvIndex}*`,
+          `🌡️ Temperature:   *${cur.temperature_2m}°C* (Feels ${cur.apparent_temperature?.toFixed(1)}°C)`,
+          `⛅ Condition:     *${condition}*`,
+          `💧 Humidity:     *${cur.relative_humidity_2m}%*`,
+          `💨 Wind:         *${cur.wind_speed_10m} km/h ${dir}*`,
+          `👁️  Visibility:   *${((cur.visibility ?? 0) / 1000).toFixed(1)} km*`,
+          `☁️  Cloud Cover:  *${cur.cloud_cover}%*`,
+          `🔆 UV Index:     *${cur.uv_index ?? 'N/A'}*`,
           ``,
-          `📅 *Tomorrow:* ${tmwDesc}`,
-          `   High: *${tmwMaxC}°C* | Low: *${tmwMinC}°C*`,
+          `📅 *Tomorrow:* ${tmwIcon} ${tmwCond}`,
+          `   High: *${tmwMax}°C* | Low: *${tmwMin}°C* | 🌧 Rain: *${tmwRain}%*`,
           ``,
-          `_Powered by wttr.in_`
+          `_Powered by Open-Meteo 🌍_`
         ].join('\n')
 
         await sock.sendMessage(ctx.from, { edit: ph.key, text })
       } catch (err) {
-        await sock.sendMessage(ctx.from, { edit: ph.key, text: `❌ Weather fetch failed: ${err.message}\n\n_Try a major city name, e.g. Lagos, London, New York_` })
+        await sock.sendMessage(ctx.from, { edit: ph.key, text: `❌ Weather failed: ${err.message}\n\n_Try a major city name e.g. Lagos, London, New York_` })
       }
     }
   },
 
-  // ── .image (image search) ─────────────────────────────────────────────────
+  // ── .imgsearch (Lexica.art — free, no API key needed) ────────────────────
   {
     command: 'imgsearch',
     aliases: ['imagesearch', 'imgs', 'searchimage'],
@@ -290,26 +284,40 @@ export default [
     handler: async (sock, msg, ctx, { api }) => {
       const query = ctx.query?.trim()
       if (!query) return sock.sendMessage(ctx.from, {
-        text: `❌ *Usage:* ${ctx.prefix}imgsearch <query>\n\n*Example:* ${ctx.prefix}imgsearch sunset beach`
+        text: `❌ *Usage:* ${ctx.prefix}imgsearch <query>\n\n*Example:* ${ctx.prefix}imgsearch sunset beach Nigeria`
       }, { quoted: msg })
 
       const ph = await sock.sendMessage(ctx.from, { text: `🖼️ Searching images for _${query}_...` }, { quoted: msg })
 
       try {
-        // Use Pollinations to generate an image based on the query (instant, free)
-        const prompt = encodeURIComponent(query)
-        const seed = Math.floor(Math.random() * 9999)
-        const imgUrl = `https://image.pollinations.ai/prompt/${prompt}?width=1024&height=768&seed=${seed}&nologo=true`
-        const res = await fetch(imgUrl, {
-          headers: { 'User-Agent': 'FirekidXMD/1.0' },
-          signal: AbortSignal.timeout(45_000)
-        })
+        // Lexica.art — free AI image search, no key needed
+        const res = await fetch(
+          `https://lexica.art/api/v1/search?q=${encodeURIComponent(query)}`,
+          { headers: { 'User-Agent': 'FirekidXMD/1.0', 'Accept': 'application/json' }, signal: AbortSignal.timeout(15_000) }
+        )
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const buf = Buffer.from(await res.arrayBuffer())
+        const data = await res.json()
+
+        const images = data?.images || []
+        if (!images.length) throw new Error('No images found for that query')
+
+        // Pick a random one from the top 10 results for variety
+        const pick = images[Math.floor(Math.random() * Math.min(images.length, 10))]
+        const imgUrl = pick.src || pick.srcSmall
+        if (!imgUrl) throw new Error('No image URL in response')
+
+        // Fetch image as buffer
+        const imgRes = await fetch(imgUrl, {
+          headers: { 'User-Agent': 'FirekidXMD/1.0' },
+          signal: AbortSignal.timeout(30_000)
+        })
+        if (!imgRes.ok) throw new Error(`Image fetch failed: ${imgRes.status}`)
+        const buf = Buffer.from(await imgRes.arrayBuffer())
+
         await sock.sendMessage(ctx.from, { delete: ph.key })
         await sock.sendMessage(ctx.from, {
           image: buf,
-          caption: `🖼️ *Image Result: ${query}*\n_Generated by AI (Pollinations) 🔥_`
+          caption: `🖼️ *Image Result: ${query}*\n_Powered by Lexica.art 🔥_`
         }, { quoted: msg })
       } catch (err) {
         await sock.sendMessage(ctx.from, { edit: ph.key, text: `❌ Image search failed: ${err.message}` })
