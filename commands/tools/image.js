@@ -344,7 +344,7 @@ export default [
             `${ctx.prefix}opay <amount> | <receiver name> | <receiver bank> | <receiver account> | <sender name> | <sender bank>`,
             ``,
             `*Example:*`,
-            `${ctx.prefix}opay 1650 | JAYWONULTIMATE ENTERPRISES | MONIE POINT | 8253381685 | RAMAT OYINLOLA YAHAYA | OPay`
+            `${ctx.prefix}opay 1650 | Firekid846 | MONIE POINT | 1234567890 | Firekid | OPay`
           ].join('\n')
         }, { quoted: msg })
       }
@@ -360,7 +360,7 @@ export default [
 
       if (isNaN(amount) || amount <= 0) {
         return sock.sendMessage(ctx.from, {
-          text: `❌ Provide a valid amount.\n*Example:* ${ctx.prefix}opay 1650 | John Doe | GTBank | 0123456789 | Jane Doe | OPay`
+          text: `❌ Provide a valid amount.\n*Example:* ${ctx.prefix}opay 1650 | Firekid846 | MONIE POINT | 1234567890 | Firekid | OPay`
         }, { quoted: msg })
       }
 
