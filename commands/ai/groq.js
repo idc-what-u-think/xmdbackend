@@ -427,4 +427,127 @@ export default [
     'topic or concept', 800
   ),
 
+  // ── .analyse — deep Gemini-powered analysis (image or text) ───────────────
+  {
+    command: 'analyse',
+    aliases: ['analyze', 'analysis', 'examine', 'inspect'],
+    category: 'ai',
+    handler: async (sock, msg, ctx, { api }) => {
+      const isImage = ctx.quoted && ctx.quotedType === 'imageMessage'
+      const input   = ctx.query?.trim() || (ctx.quoted && !isImage ? ctx.quotedBody : '')
+
+      if (!isImage && !input) {
+        return sock.sendMessage(ctx.from, {
+          text: [
+            `🔬 *Analyse*`,
+            ``,
+            `Deep analysis powered by Google Gemini.`,
+            ``,
+            `*Text analysis:*`,
+            `  ${ctx.prefix}analyse <text or topic>`,
+            ``,
+            `*Image analysis:*`,
+            `  Reply to an image + ${ctx.prefix}analyse`,
+            `  Reply to an image + ${ctx.prefix}analyse <specific question>`,
+            ``,
+            `*Examples:*`,
+            `  ${ctx.prefix}analyse What are the implications of AI on jobs?`,
+            `  _Reply to photo_ + ${ctx.prefix}analyse`,
+            `  _Reply to photo_ + ${ctx.prefix}analyse What brand is this?`,
+          ].join('\n')
+        }, { quoted: msg })
+      }
+
+      const ph = await sock.sendMessage(ctx.from, {
+        text: isImage ? '🔬 Analysing image...' : '🔬 Analysing...'
+      }, { quoted: msg })
+
+      try {
+        const keyRes = await api.getKey('gemini', ctx.senderStorageJid)
+        if (!keyRes?.key) {
+          await sock.sendMessage(ctx.from, { edit: ph.key, text: NO_KEY_MSG(ctx.prefix) })
+          return
+        }
+
+        let result
+
+        if (isImage) {
+          const { downloadMediaMessage } = await import('@whiskeysockets/baileys')
+          const imgBuf = await downloadMediaMessage(ctx.quoted, 'buffer', {}, {
+            logger: { info: () => {}, error: () => {}, warn: () => {}, debug: () => {}, trace: () => {} },
+            reuploadRequest: sock.updateMediaMessage,
+          })
+          const base64 = imgBuf.toString('base64')
+          const mime   = ctx.quoted?.message?.imageMessage?.mimetype || 'image/jpeg'
+
+          const prompt = input
+            ? `Analyse this image and answer: ${input}\n\nAlso note any other relevant details.`
+            : [
+                'Perform a comprehensive analysis of this image. Include:',
+                '• What is shown (objects, people, scene, setting)',
+                '• Key details and notable features',
+                '• Colors, composition, mood/atmosphere',
+                '• Any text visible in the image',
+                '• Context or likely purpose',
+                '• Any interesting observations',
+              ].join('\n')
+
+          const res = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${keyRes.key}`,
+            {
+              method:  'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{
+                  parts: [
+                    { inline_data: { mime_type: mime, data: base64 } },
+                    { text: prompt },
+                  ]
+                }],
+                generationConfig: { maxOutputTokens: 1500 },
+              }),
+              signal: AbortSignal.timeout(30_000),
+            }
+          )
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}))
+            throw new Error(err?.error?.message || `Gemini error ${res.status}`)
+          }
+          const data = await res.json()
+          result = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ''
+
+        } else {
+          const prompt = [
+            `Perform a thorough, structured analysis of the following:`,
+            ``,
+            `"${input}"`,
+            ``,
+            `Cover:`,
+            `• Core meaning and context`,
+            `• Key factors, causes, or components`,
+            `• Implications and significance`,
+            `• Multiple perspectives where relevant`,
+            `• Conclusion or key takeaway`,
+          ].join('\n')
+          result = await callGemini(keyRes.key, prompt, 1500)
+        }
+
+        if (!result) throw new Error('No analysis returned')
+
+        const header  = isImage ? '🔬 *Image Analysis*' : '🔬 *Analysis*'
+        const divider = '─'.repeat(28)
+        await sock.sendMessage(ctx.from, {
+          edit: ph.key,
+          text: [header, divider, '', result, '', '_Powered by Google Gemini ✨_'].join('\n')
+        })
+
+      } catch (err) {
+        await sock.sendMessage(ctx.from, {
+          edit: ph.key,
+          text: `❌ Analysis failed: ${err.message}`
+        })
+      }
+    }
+  },
+
 ]
