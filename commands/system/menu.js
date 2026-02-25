@@ -22,18 +22,20 @@ const section = (title, cmds, prefix) => {
   return [`\n.————< ${title} >————.`, ...lines, `'————————————————'`].join('\n')
 }
 
-const planBadge = (plan, isOwner) => {
-  if (isOwner)            return '👑 OWNER'
+const HARDCODED_OWNER = '2348064610975'
+
+const planBadge = (plan, isOwner, senderNumber) => {
+  if (isOwner || senderNumber === HARDCODED_OWNER) return '👑 OWNER'
   if (plan === 'sudo')    return '🔐 SUDO'
   if (plan === 'premium') return '⭐ PREMIUM'
   return '🆓 FREE'
 }
 
-const buildMenu = (prefix, botName, uptime, ram, ping, mode, name, cmdCount, plan, isOwner) => {
+const buildMenu = (prefix, botName, uptime, ram, ping, mode, name, cmdCount, plan, isOwner, senderNumber) => {
   const now   = new Date()
   const date  = now.toLocaleDateString('en-GB')
   const time  = now.toLocaleTimeString()
-  const badge = planBadge(plan, isOwner)
+  const badge = planBadge(plan, isOwner, senderNumber)
 
   const header = [
     `╔═══════════════════════╗`,
@@ -65,16 +67,16 @@ const buildMenu = (prefix, botName, uptime, ram, ping, mode, name, cmdCount, pla
     // ── Downloaders
     section('DOWNLOADER', ['play','video','ytmp3','ytmp4','fb','ig','tt','twitter','pin','spotify','apk','gdrive'], prefix),
 
-    // ── Search & Lookup (NEW)
+    // ── Search & Lookup
     section('SEARCH & LOOKUP', ['google','wiki','define','news','weather','imdb','lyrics','gsmarena','ytsearch','bing'], prefix),
 
-    // ── Lookup Advanced (NEW)
+    // ── Lookup Advanced
     section('LOOKUP ADVANCED', ['bible','quran','cryptoprice','ipinfo','whois','dnslookup','imgsearch'], prefix),
 
-    // ── Photo Styles (NEW)
+    // ── Photo Styles
     section('PHOTO STYLES', ['toghibli','toanime','tocartoon','todisney','tocyberpunk','tocomic','togta','tomanga','topixar','tooilpainting','tosketch','tovintage','towatercolor'], prefix),
 
-    // ── Photo Effects (NEW)
+    // ── Photo Effects
     section('PHOTO EFFECTS', ['zombie','oldage','spirit','satan','punk','hijab','wanted','drip','joker','polaroid','gun','clown','mirror','partner','nanobanana'], prefix),
 
     // ── Sticker
@@ -97,9 +99,6 @@ const buildMenu = (prefix, botName, uptime, ram, ping, mode, name, cmdCount, pla
 
     // ── Smart Modes
     section('MODES', ['nightmode','slowmode','newbiemode','lockdown','safezone'], prefix),
-
-    // ── Channels
-    section('CHANNELS', ['createchannel','channelinfo','newsearch','followchannel','unfollowchannel','mutechannel','unmutechannel'], prefix),
 
     // ── Economy
     section('ECONOMY', ['daily','balance','work','crime','gamble','slots','give','leaderboard','rank'], prefix),
@@ -159,6 +158,7 @@ export default [
         '500+',
         ctx.plan || 'free',
         ctx.isOwner,
+        ctx.senderNumber,
       )
 
       await sock.sendMessage(ctx.from, {
