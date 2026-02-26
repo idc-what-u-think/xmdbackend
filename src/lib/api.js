@@ -1,18 +1,20 @@
 // src/lib/api.js
 // Complete wrapper for every Worker API call the bot needs.
 
-const W  = () => process.env.WORKER_URL
-const S  = () => process.env.BOT_SECRET
+const W   = () => process.env.WORKER_URL
+const S   = () => process.env.BOT_SECRET
 const SID = () => process.env.SESSION_ID || ''
+const FK  = () => process.env.FIREKID_KEY || ''  // ← FK key fix
 
 const call = async (path, opts = {}) => {
   try {
     const r = await fetch(`${W()}${path}`, {
       ...opts,
       headers: {
-        'Content-Type':  'application/json',
-        'X-Bot-Secret':  S(),
-        'X-Session-Id':  SID(),
+        'Content-Type':   'application/json',
+        'X-Bot-Secret':   S(),
+        'X-Session-Id':   SID(),
+        'X-Firekid-Key':  FK(),   // ← sent on EVERY request now
         ...opts.headers,
       },
     })
@@ -55,11 +57,9 @@ export const api = {
     }),
 
   // ── Plan / user ───────────────────────────────────────
-  // Returns { plan }
   getPlan: (jid) =>
     call(`/bot/plan?jid=${encodeURIComponent(jid)}`),
 
-  // Sets plan in D1 (and KV cache) — fixes sudo/ban disconnect
   setPlan: (jid, plan) =>
     call('/bot/plan', {
       method: 'POST',
@@ -74,8 +74,6 @@ export const api = {
     }),
 
   // ── API key rotation ──────────────────────────────────
-  // Pass the sender's JID so the worker selects premium or global keys
-  // Returns { key, remaining } or { ok: false, error: 'NO_KEY' }
   getKey: (service, jid = '') =>
     call(`/bot/key?service=${encodeURIComponent(service)}&jid=${encodeURIComponent(jid)}`),
 
@@ -116,17 +114,17 @@ export const api = {
       body:   JSON.stringify({ jid, field, value }),
     }),
 
-  // Atomic multi-field update — use this for work/crime to avoid race conditions
-  setEcoBatch: (jid, fields) =>
+  // FIX: was sending { jid, fields } but worker expected { jid, updates }
+  setEcoBatch: (jid, updates) =>
     call('/bot/eco/batch', {
       method: 'POST',
-      body:   JSON.stringify({ jid, fields }),
+      body:   JSON.stringify({ jid, updates }),
     }),
 
   getLeaderboard: () =>
     call('/bot/eco/leaderboard'),
 
-  // ── Bot settings (admin config like daily_config, work_config) ────────────
+  // ── Bot settings ─────────────────────────────────────
   getSetting: (key) =>
     call(`/bot/settings?key=${encodeURIComponent(key)}`),
 
@@ -136,11 +134,56 @@ export const api = {
       body:   JSON.stringify({ key, value }),
     }),
 
-  // ── Reports → your admin dashboard ────────────────────
+  // ── Prefix ────────────────────────────────────────────
+  getPrefix: (accountId) =>
+    call(`/bot/prefix?accountId=${encodeURIComponent(accountId)}`),
+
+  // ── Commands ──────────────────────────────────────────
+  getCommands: () =>
+    call('/bot/commands'),
+
+  // ── Reports ───────────────────────────────────────────
   sendReport: (senderNumber, chatId, isGroup, groupName, message) =>
     call('/bot/report', {
       method: 'POST',
       body:   JSON.stringify({ senderNumber, chatId, isGroup, groupName, message }),
     }),
 
+  // ── Cards ─────────────────────────────────────────────
+  // Get cards owned by user (uses FK key server-side to resolve account)
+  getCards: (category) =>
+    call(`/bot/cards?category=${encodeURIComponent(category)}`),
+
+  // Get active packs for a category
+  getPacks: (category) =>
+    call(`/bot/packs?category=${encodeURIComponent(category)}`),
+
+  // Spin a pack — count = 1 or 10
+  spinPack: (packId, count = 1) =>
+    call('/bot/packs/spin', {
+      method: 'POST',
+      body:   JSON.stringify({ pack_id: packId, count }),
+    }),
+
+  // Get marketplace listings
+  getMarket: (category) =>
+    call(`/bot/market?category=${encodeURIComponent(category)}`),
+
+  // Release a card to marketplace
+  releaseCard: (userCardId) =>
+    call('/bot/market/list', {
+      method: 'POST',
+      body:   JSON.stringify({ user_card_id: userCardId }),
+    }),
+
+  // Buy from marketplace
+  buyCard: (listingId) =>
+    call('/bot/market/buy', {
+      method: 'POST',
+      body:   JSON.stringify({ listing_id: listingId }),
+    }),
+
+  // Get user showcase cards
+  getShowcase: (accountId) =>
+    call(`/bot/cards/showcase?account_id=${encodeURIComponent(accountId)}`),
 }
