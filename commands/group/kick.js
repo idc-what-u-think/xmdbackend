@@ -1,3 +1,17 @@
+// ── LID-safe participant matcher ─────────────────────────────────────────────
+// In LID groups, mentioned JIDs and participant IDs are both @lid — direct
+// equality works. But in mixed or transitioning groups, one side may be @lid
+// while the other is @s.whatsapp.net.  This helper handles both cases by
+// comparing normalized phone digits and also checking p.pn when available.
+const pMatch = (p, jid) => {
+  if (!p || !jid) return false
+  if (p.id === jid) return true
+  // p.pn is set by Baileys v7 for LID participants — it holds the real phone
+  const pNum = (p.pn || p.id).split('@')[0].replace(/\D/g, '')
+  const jNum = jid.split('@')[0].replace(/\D/g, '')
+  return pNum.length > 4 && pNum === jNum
+}
+
 export default [
   {
     command: 'kick',
@@ -9,7 +23,7 @@ export default [
       const target = ctx.mentionedJids[0] || ctx.quotedSender
       if (!target) return sock.sendMessage(ctx.from, { text: `❌ Tag or reply to a user.\n📌 *Usage:* ${ctx.prefix}kick @user` }, { quoted: msg })
       const parts = ctx.groupMeta?.participants || []
-      const isAdm = parts.some(p => p.id === target && ['admin','superadmin'].includes(p.admin))
+      const isAdm = parts.some(p => pMatch(p, target) && ['admin','superadmin'].includes(p.admin))
       if (isAdm) return sock.sendMessage(ctx.from, { text: '❌ Cannot kick an admin.' }, { quoted: msg })
       if (target === ctx.botId) return sock.sendMessage(ctx.from, { text: '❌ I cannot kick myself.' }, { quoted: msg })
       await sock.groupParticipantsUpdate(ctx.from, [target], 'remove')
