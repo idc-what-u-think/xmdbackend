@@ -1,3 +1,12 @@
+// ── LID-safe participant matcher ─────────────────────────────────────────────
+const pMatch = (p, jid) => {
+  if (!p || !jid) return false
+  if (p.id === jid) return true
+  const pNum = (p.pn || p.id).split('@')[0].replace(/\D/g, '')
+  const jNum = jid.split('@')[0].replace(/\D/g, '')
+  return pNum.length > 4 && pNum === jNum
+}
+
 const MAX_WARNS = 3
 
 export default [
@@ -10,7 +19,7 @@ export default [
       const target = ctx.mentionedJids[0] || ctx.quotedSender
       if (!target) return sock.sendMessage(ctx.from, { text: `❌ Tag or reply to a user.\n📌 *Usage:* ${ctx.prefix}warn @user [reason]` }, { quoted: msg })
       const parts = ctx.groupMeta?.participants || []
-      const isAdm = parts.some(p => p.id === target && ['admin','superadmin'].includes(p.admin))
+      const isAdm = parts.some(p => pMatch(p, target) && ['admin','superadmin'].includes(p.admin))
       if (isAdm) return sock.sendMessage(ctx.from, { text: '❌ Cannot warn an admin.' }, { quoted: msg })
       const reason = ctx.args.filter(a => !a.startsWith('@')).join(' ') || 'No reason given'
       const res = await api.addWarn(target, ctx.from, reason, ctx.sender)
