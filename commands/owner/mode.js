@@ -1,4 +1,32 @@
 import { setModeMemory } from '../../src/lib/handler.js'
+import { lidPhoneCache } from '../../src/lib/ctx.js'
+
+// ── Resolve a real phone number from a possibly-@lid JID ─────────────────────
+// When owner does .sudo @user inside a LID group, ctx.mentionedJids[0] is
+// something like "99123456@lid". We must store the real phone number in the
+// DB (e.g. "2348xxx@s.whatsapp.net"), not the LID digits.
+//
+// Resolution order:
+//   1. If already @s.whatsapp.net — digits are correct, use them directly
+//   2. groupMeta.participants[x].pn — Baileys v7 sets this for LID participants
+//   3. lidPhoneCache — populated by contacts.upsert / onWhatsApp() at startup
+//   4. Fallback — LID digits (wrong for LID groups, but prevents a hard crash)
+const resolveToPhone = (jid, groupMeta) => {
+  if (!jid) return null
+  if (!jid.endsWith('@lid')) {
+    // Already a phone-format JID — just strip domain
+    return jid.split('@')[0].replace(/\D/g, '') + '@s.whatsapp.net'
+  }
+  // Try group participant list first
+  if (groupMeta?.participants) {
+    const p = groupMeta.participants.find(pt => pt.id === jid)
+    if (p?.pn) return p.pn.replace(/\D/g, '') + '@s.whatsapp.net'
+  }
+  // Try in-process LID cache
+  if (lidPhoneCache.has(jid)) return lidPhoneCache.get(jid) + '@s.whatsapp.net'
+  // Last resort — use raw LID digits (will be wrong for Nigerian numbers etc.)
+  return jid.split('@')[0].replace(/\D/g, '') + '@s.whatsapp.net'
+}
 
 export default [
   {
@@ -58,7 +86,12 @@ export default [
       if (targetJid === ctx.sender || targetJid === ctx.senderStorageJid)
         return sock.sendMessage(ctx.from, { text: '❌ You are already the owner — no need to add yourself as sudo.' }, { quoted: msg })
 
-      const normalised = targetJid.split('@')[0].replace(/\D/g, '') + '@s.whatsapp.net'
+      // Resolve real phone JID — critical when targetJid is @lid
+      const normalised = resolveToPhone(targetJid, ctx.groupMeta)
+      if (!normalised) return sock.sendMessage(ctx.from, {
+        text: '❌ Could not resolve this user\'s phone number. Try running the command in a DM or non-LID group.'
+      }, { quoted: msg })
+
       const res = await api.setPlan(normalised, 'sudo')
       if (!res?.ok) return sock.sendMessage(ctx.from, {
         text: `❌ Failed to grant sudo. Worker error: ${res?.error || 'unknown'}`
@@ -71,10 +104,13 @@ export default [
         await api.sessionSet('sudo_list', JSON.stringify(sudoList))
       }
 
+      // Show the real phone number so owner can confirm it resolved correctly
+      const displayNum = normalised.replace('@s.whatsapp.net', '')
       await sock.sendMessage(ctx.from, {
         text: [
           `✅ *Sudo Access Granted*`, ``,
-          `👤 @${targetJid.split('@')[0]} is now a sudo user.`, ``,
+          `👤 @${targetJid.split('@')[0]} is now a sudo user.`,
+          `📱 Stored as: +${displayNum}`, ``,
           `They can now use restricted commands.`,
           `_Sudo users: ${sudoList.length}_`
         ].join('\n'),
@@ -95,7 +131,12 @@ export default [
         text: `❌ Tag or reply to the user to remove sudo.\n📌 *Usage:* ${ctx.prefix}delsudo @user`
       }, { quoted: msg })
 
-      const normalised = targetJid.split('@')[0].replace(/\D/g, '') + '@s.whatsapp.net'
+      // Resolve real phone JID — same fix as sudo
+      const normalised = resolveToPhone(targetJid, ctx.groupMeta)
+      if (!normalised) return sock.sendMessage(ctx.from, {
+        text: '❌ Could not resolve this user\'s phone number.'
+      }, { quoted: msg })
+
       const res = await api.setPlan(normalised, 'free')
       if (!res?.ok) return sock.sendMessage(ctx.from, {
         text: `❌ Failed to remove sudo. Worker error: ${res?.error || 'unknown'}`
@@ -131,11 +172,16 @@ export default [
         text: [`👥 *Sudo Users — Empty*`, ``, `No sudo users yet.`, `Add one with ${ctx.prefix}sudo @user`].join('\n')
       }, { quoted: msg })
 
-      const lines = sudoList.map((jid, i) => `${i + 1}. @${jid.split('@')[0]}`)
+      // sudoList entries are always @s.whatsapp.net now (fixed phone numbers)
+      const lines = sudoList.map((jid, i) => {
+        const num = jid.replace('@s.whatsapp.net', '')
+        return `${i + 1}. +${num}`
+      })
+
       await sock.sendMessage(ctx.from, {
         text: [
           `👥 *Sudo Users (${sudoList.length})*`, `${'─'.repeat(26)}`, ``,
-          `👑 Owner: @${ctx.ownerNumber} *(permanent)*`, ``,
+          `👑 Owner: +${ctx.ownerNumber} *(permanent)*`, ``,
           ...lines, ``,
           `_Remove with ${ctx.prefix}delsudo @user_`
         ].join('\n'),
