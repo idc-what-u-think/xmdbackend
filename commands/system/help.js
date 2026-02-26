@@ -273,6 +273,24 @@ const HELP = {
   give: { category: 'Economy', desc: 'Transfer coins to another member.', usage: '.give @user <amount>', example: '.give @jane 1000' },
   leaderboard: { category: 'Economy', desc: 'View top 10 richest users.', usage: '.leaderboard' },
 
+  // ── ANIME CARDS ───────────────────────────────────────────────────────────
+  acard: {
+    category: 'Anime Cards',
+    desc: 'Anime card collection system. Spin packs, collect characters, trade in the marketplace.',
+    usage: '.acard <list|view|dups|top|packs|spin|spin10|release|market|buy|showcase>',
+    example: '.acard spin Naruto Pack\n.acard list\n.acard buy 3\n.acard showcase @user',
+    note: 'Cards are stored to your account via FK key — survive reconnects and number changes.',
+  },
+
+  // ── FOOTBALL CARDS ────────────────────────────────────────────────────────
+  fcard: {
+    category: 'Football Cards',
+    desc: 'Football card collection system. Spin packs, collect players, trade in the marketplace.',
+    usage: '.fcard <list|view|dups|top|packs|spin|spin10|release|market|buy|showcase>',
+    example: '.fcard spin World Class Pack\n.fcard list\n.fcard buy 2\n.fcard showcase @user',
+    note: 'Tiers: Bronze / Silver / Gold / Icon. Cards persist to your dashboard account.',
+  },
+
   // ── GAMES ─────────────────────────────────────────────────────────────────
   truth: { category: 'Games', desc: 'Get a random Truth question.', usage: '.truth' },
   dare: { category: 'Games', desc: 'Get a random Dare challenge.', usage: '.dare' },
