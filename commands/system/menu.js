@@ -103,6 +103,12 @@ const buildMenu = (prefix, botName, uptime, ram, ping, mode, name, cmdCount, pla
     // ── Economy
     section('ECONOMY', ['daily','balance','work','crime','gamble','slots','give','leaderboard','rank'], prefix),
 
+    // ── Anime Cards
+    section('ANIME CARDS', ['acard list','acard packs','acard spin','acard market','acard showcase'], prefix),
+
+    // ── Football Cards
+    section('FOOTBALL CARDS', ['fcard list','fcard packs','fcard spin','fcard market','fcard showcase'], prefix),
+
     // ── Games
     section('GAMES', ['truth','dare','8ball','rps','dice','coinflip','trivia','riddle','guess','wcg'], prefix),
 
