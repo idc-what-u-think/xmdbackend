@@ -33,16 +33,67 @@ export default [
     aliases: ['myjid', 'myid'],
     category: 'profile',
     handler: async (sock, msg, ctx, { api }) => {
+      const targetRaw = ctx.mentionedJids?.[0] || ctx.quotedSender
+
+      if (!targetRaw) {
+        // No tag/reply — show sender's own JID
+        return sock.sendMessage(ctx.from, {
+          text: [
+            `🪪 *Your JID Info*`,
+            `${'─'.repeat(28)}`,
+            ``,
+            `📱 *JID:*    \`${ctx.sender}\``,
+            `🔢 *Number:* +${ctx.senderNumber}`,
+            `👤 *Name:*   ${ctx.pushName || 'Not set'}`,
+            ``,
+            `_Tag someone to look up their JID_`
+          ].join('\n')
+        }, { quoted: msg })
+      }
+
+      // Resolve tagged/quoted user — handles @lid → real phone
+      let resolvedPhone = null
+      let resolvedJid   = targetRaw
+
+      if (targetRaw.endsWith('@lid') && ctx.groupMeta?.participants) {
+        const p = ctx.groupMeta.participants.find(pt => pt.id === targetRaw)
+        if (p?.pn) {
+          resolvedPhone = p.pn.replace(/\D/g, '')
+          resolvedJid   = resolvedPhone + '@s.whatsapp.net'
+        }
+      }
+
+      if (!resolvedPhone) {
+        try {
+          const results = await sock.onWhatsApp(targetRaw)
+          if (results?.length) {
+            resolvedJid   = results[0].jid || targetRaw
+            resolvedPhone = resolvedJid.split('@')[0].replace(/\D/g, '')
+          }
+        } catch {}
+      }
+
+      if (!resolvedPhone) {
+        resolvedPhone = targetRaw.split('@')[0].replace(/\D/g, '')
+        resolvedJid   = resolvedPhone + '@s.whatsapp.net'
+      }
+
+      // Seed the lid→phone cache so .sudo works immediately after this
+      if (targetRaw.endsWith('@lid') && resolvedPhone) {
+        const { setLidMapping } = await import('../../src/lib/ctx.js')
+        setLidMapping(targetRaw, resolvedPhone)
+      }
+
       await sock.sendMessage(ctx.from, {
         text: [
-          `🪪 *Your JID Info*`,
+          `🪪 *User JID Info*`,
           `${'─'.repeat(28)}`,
           ``,
-          `📱 *JID:*    \`${ctx.sender}\``,
-          `🔢 *Number:* +${ctx.senderNumber}`,
-          `👤 *Name:*   ${ctx.pushName || 'Not set'}`,
+          `📱 *JID:*    \`${resolvedJid}\``,
+          `🔢 *Number:* +${resolvedPhone}`,
+          `🔖 *Raw:*    \`${targetRaw}\``,
           ``,
-          `_JID = WhatsApp internal identifier_`
+          `_Cache seeded — .sudo @user will now work_`
         ].join('\n')
       }, { quoted: msg })
     }
