@@ -228,7 +228,13 @@ const HELP = {
   antimedia: { category: 'Anti / Protect', desc: 'Block all media in the group.', usage: '.antimedia on/off', flags: 'adminOnly' },
   anticall: { category: 'Anti / Protect', desc: 'Auto-reject calls to the bot.', usage: '.anticall on/off', flags: 'ownerOnly' },
   antibug: { category: 'Anti / Protect', desc: 'Protect against crash messages.', usage: '.antibug on/off', flags: 'adminOnly' },
-  antidelete: { category: 'Anti / Protect', desc: 'Resend deleted messages.', usage: '.antidelete on/off', flags: 'adminOnly' },
+  antidelete: {
+    category: 'Anti / Protect',
+    desc: 'Forward deleted messages to your self-chat (chat with yourself). Works for DMs and groups.',
+    usage: '.antidelete p | g | set | off | all off',
+    example: '.antidelete p — watch DMs\n.antidelete g — watch all groups\n.antidelete set — watch only this chat (run it there)\n.antidelete off — stop watching this chat\n.antidelete all off — turn off entirely',
+    note: 'The command message is silently deleted. All replies go to your self-chat.',
+  },
   floodblock: { category: 'Anti / Protect', desc: 'Limit message speed to prevent spam.', usage: '.floodblock on [limit] | off', note: 'Default limit: 5 msgs/5s', flags: 'adminOnly, botAdmin' },
 
   // ── AUTOMATION ────────────────────────────────────────────────────────────
@@ -400,6 +406,33 @@ const HELP = {
   mirror:       { category: 'Photo Effects', desc: 'Mirror/symmetrical reflection effect.', usage: 'Reply to image + .mirror' },
   partner:      { category: 'Photo Effects', desc: 'Romantic couple collage effect.', usage: 'Reply to image + .partner' },
   nanobanana:   { category: 'Photo Effects', desc: 'Creative AI art style — provide your own prompt.', usage: 'Reply to image + .nanobanana [style prompt]', example: '.nanobanana cyberpunk warrior' },
+
+  // ── VIEW ONCE & DOWNLOADER ────────────────────────────────────────────────
+  vv: {
+    category: 'Tools',
+    desc: 'Reveal a view once photo or video and send it in the same chat.',
+    usage: 'Reply to a view once + .vv',
+  },
+  vv2: {
+    category: 'Tools',
+    desc: 'Reveal a view once silently — sends it to your self-chat and deletes the .vv2 command. Nothing is sent in the current chat.',
+    usage: 'Reply to a view once + .vv2',
+    note: 'Completely silent — no trace left in the chat.',
+  },
+  play: {
+    category: 'Downloader',
+    desc: 'Search YouTube by song name and download it as an MP3 audio file in one command.',
+    usage: '.play <song name>',
+    example: '.play Essence Wizkid\n.play Blinding Lights The Weeknd',
+    note: 'No link needed — just the song name. Downloads the top YouTube result.',
+  },
+  searchmusic: {
+    category: 'Downloader',
+    desc: 'Search YouTube for a song and see up to 6 results with title, channel, duration, views and link. Info only — no download.',
+    usage: '.searchmusic <song name>',
+    example: '.searchmusic Burna Boy Last Last\n.searchmusic Afrobeats 2025 mix',
+    note: 'Use .play to actually download a result.',
+  },
 
   // ── TOOLS (new) ───────────────────────────────────────────────────────────
   sendstatus:   {
