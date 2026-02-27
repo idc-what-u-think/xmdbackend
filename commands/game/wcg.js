@@ -105,6 +105,12 @@ export const handleGameMessage = async (sock, msg, ctx) => {
   const nextPlayerName = game.names[nextPlayer] || nextPlayer.split('@')[0]
   const playerName = game.names[currentPlayer] || currentPlayer.split('@')[0]
 
+  // React with ✅ on the correct word message
+  await sock.sendMessage(ctx.from, { react: { text: '✅', key: msg.key } })
+
+  // Wait 3 seconds before sending the next turn prompt
+  await new Promise(r => setTimeout(r, 3000))
+
   await sock.sendMessage(ctx.from, {
     text: [`✅ *${word.toUpperCase()}* — @${playerName}`, ``, `➡️  Next letter: *${game.currentLetter.toUpperCase()}*`, `👤 @${nextPlayerName} your turn! (20s) ⏱️`, ``, `_Round ${game.round} | Words used: ${game.usedWords.size}_`].join('\n'),
     mentions: [currentPlayer, nextPlayer]
