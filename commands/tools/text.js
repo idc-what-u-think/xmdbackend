@@ -441,12 +441,12 @@ export default [
         try { obfuscator = require('javascript-obfuscator') } catch {
           throw Object.assign(new Error('javascript-obfuscator not installed'), { code: 'ERR_MODULE_NOT_FOUND' })
         }
-        // The package exports { obfuscate } or the object itself is the function
-        const obfuscate = typeof obfuscator === 'function'
-          ? obfuscator
-          : (obfuscator.obfuscate ?? obfuscator.default?.obfuscate)
-        if (typeof obfuscate !== 'function') throw Object.assign(new Error('obfuscate fn not found'), { code: 'ERR_MODULE_NOT_FOUND' })
-        const result = obfuscate(code, {
+        // Must call as obfuscator.obfuscate(code, opts) — NOT destructured.
+        // javascript-obfuscator uses a class internally; destructuring loses `this`
+        // binding and throws "Class constructor cannot be invoked without 'new'".
+        const lib = obfuscator.default ?? obfuscator
+        if (typeof lib?.obfuscate !== 'function') throw Object.assign(new Error('obfuscate fn not found'), { code: 'ERR_MODULE_NOT_FOUND' })
+        const result = lib.obfuscate(code, {
           compact: true,
           controlFlowFlattening: true,
           controlFlowFlatteningThreshold: 0.75,
@@ -462,27 +462,21 @@ export default [
         })
         const obfCode = result.getObfuscatedCode()
         await sock.sendMessage(ctx.from, { delete: placeholder.key })
-        if (obfCode.length <= 2000) {
-          await sock.sendMessage(ctx.from, {
-            text: `🔒 *Obfuscated Code*\n${'─'.repeat(28)}\n\n\`\`\`\n${obfCode}\n\`\`\``
-          }, { quoted: msg })
-        } else {
-          const { writeFile, unlink } = await import('fs/promises')
-          const { tmpdir } = await import('os')
-          const { join } = await import('path')
-          const { randomBytes } = await import('crypto')
-          const outPath = join(tmpdir(), `fkd_${randomBytes(6).toString('hex')}.js`)
-          await writeFile(outPath, obfCode)
-          const { readFile } = await import('fs/promises')
-          const fileBuf = await readFile(outPath)
-          await sock.sendMessage(ctx.from, {
-            document: fileBuf,
-            fileName: 'obfuscated.js',
-            mimetype: 'text/javascript',
-            caption: `🔒 *Obfuscated Code*\n📦 Size: ${(obfCode.length / 1024).toFixed(2)} KB`
-          }, { quoted: msg })
-          await unlink(outPath).catch(() => {})
-        }
+
+        const { writeFile, unlink, readFile } = await import('fs/promises')
+        const { tmpdir } = await import('os')
+        const { join } = await import('path')
+        const { randomBytes } = await import('crypto')
+        const outPath = join(tmpdir(), `fkd_${randomBytes(6).toString('hex')}.js`)
+        await writeFile(outPath, obfCode)
+        const fileBuf = await readFile(outPath)
+        await sock.sendMessage(ctx.from, {
+          document: fileBuf,
+          fileName: 'obfuscated.js',
+          mimetype: 'text/javascript',
+          caption: `🔒 *Obfuscated Code*\n${'─'.repeat(28)}\n📦 Size: ${(obfCode.length / 1024).toFixed(2)} KB\n_Protected with javascript-obfuscator_`
+        }, { quoted: msg })
+        await unlink(outPath).catch(() => {})
       } catch (err) {
         if (err.code === 'ERR_MODULE_NOT_FOUND' || err.message?.includes('Cannot find')) {
           await sock.sendMessage(ctx.from, {
