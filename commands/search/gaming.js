@@ -535,7 +535,7 @@ export default [
       if (!input) return sock.sendMessage(ctx.from, {
         text: [
           `📦 *Download GitHub Repo as ZIP*`,
-          D,
+          `${'─'.repeat(28)}`,
           `*Usage:* ${ctx.prefix}downloadrepo <github URL or owner/repo>`,
           ``,
           `*Examples:*`,
@@ -548,42 +548,52 @@ export default [
       try {
         // Parse input — accept full URL or owner/repo
         let owner, repo
-        const urlMatch = input.match(/github\.com\/([^/]+)\/([^/\s?#]+)/)
+        const urlMatch   = input.match(/github\.com\/([^/]+)\/([^/\s?#]+)/)
         const shortMatch = input.match(/^([a-zA-Z0-9_.-]+)\/([a-zA-Z0-9_.-]+)$/)
 
-        if (urlMatch) { owner = urlMatch[1]; repo = urlMatch[2].replace(/\.git$/, '') }
+        if (urlMatch)      { owner = urlMatch[1];  repo = urlMatch[2].replace(/\.git$/, '') }
         else if (shortMatch) { owner = shortMatch[1]; repo = shortMatch[2] }
         else throw new Error('Invalid format. Use a GitHub URL or `owner/repo`')
 
-        // Get repo info to find default branch + size
-        const headers = {}
+        const headers = { 'User-Agent': 'FirekidXMD/2.0' }
         if (process.env.GITHUB_TOKEN) headers['Authorization'] = `token ${process.env.GITHUB_TOKEN}`
 
         await sock.sendMessage(ctx.from, { edit: ph.key, text: `📦 Getting repo info for *${owner}/${repo}*...` })
 
-        const infoRes = await GET(`https://api.github.com/repos/${owner}/${repo}`, headers)
-        if (!infoRes.ok) throw new Error(`Repo not found: ${owner}/${repo}`)
-        const info = await infoRes.json()
+        // Get repo info to find default branch + size
+        const infoRes = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+          headers,
+          signal: AbortSignal.timeout(15_000),
+        })
+        if (infoRes.status === 404) throw new Error(`Repo not found: *${owner}/${repo}*\n\nCheck the URL and make sure it's a public repo.`)
+        if (!infoRes.ok) throw new Error(`GitHub API error (${infoRes.status})`)
 
+        const info   = await infoRes.json()
         const sizeMB = (info.size / 1024).toFixed(1)
-        if (info.size > 150_000) throw new Error(`Repo is too large (${sizeMB}MB). Max allowed: ~150MB`)
+        if (info.size > 100_000) throw new Error(`Repo is too large (${sizeMB}MB). WhatsApp max is ~64MB. Try a smaller repo.`)
 
         const branch = info.default_branch || 'main'
-        const zipUrl = `https://github.com/${owner}/${repo}/archive/refs/heads/${branch}.zip`
+        const zipUrl = `https://codeload.github.com/${owner}/${repo}/zip/refs/heads/${branch}`
 
-        await sock.sendMessage(ctx.from, { edit: ph.key, text: `📦 Downloading *${owner}/${repo}* (${sizeMB}MB)...\n_This may take a moment_` })
-
-        // Download the ZIP
-        const zipRes = await fetch(zipUrl, {
-          headers: { 'User-Agent': 'FirekidXMD/2.0', ...headers },
-          signal: AbortSignal.timeout(60_000),
+        await sock.sendMessage(ctx.from, {
+          edit: ph.key,
+          text: `📦 Downloading *${owner}/${repo}* (~${sizeMB}MB)...\n_This may take a moment_`
         })
-        if (!zipRes.ok) throw new Error(`Download failed (HTTP ${zipRes.status})`)
 
-        const arrayBuf = await zipRes.arrayBuffer()
-        const buf = Buffer.from(arrayBuf)
+        // codeload.github.com serves direct ZIP — no redirect needed unlike github.com/archive
+        const zipRes = await fetch(zipUrl, {
+          headers,
+          redirect: 'follow',
+          signal: AbortSignal.timeout(90_000),
+        })
 
-        const fileName = `${repo}-${branch}.zip`
+        if (!zipRes.ok) throw new Error(`ZIP download failed (HTTP ${zipRes.status})`)
+
+        const buf = Buffer.from(await zipRes.arrayBuffer())
+        if (buf.length < 100) throw new Error('Downloaded file is empty — repo may be empty or access denied')
+
+        const actualMB  = (buf.length / 1024 / 1024).toFixed(1)
+        const fileName  = `${repo}-${branch}.zip`
 
         await sock.sendMessage(ctx.from, {
           document: buf,
@@ -591,13 +601,13 @@ export default [
           fileName,
           caption: [
             `📦 *${owner}/${repo}*`,
-            D,
+            `${'─'.repeat(28)}`,
             `📝 ${info.description || 'No description'}`,
-            `⭐ Stars: *${n(info.stargazers_count)}*`,
-            `🍴 Forks: *${n(info.forks_count)}*`,
+            `⭐ Stars: *${info.stargazers_count?.toLocaleString()}*`,
+            `🍴 Forks: *${info.forks_count?.toLocaleString()}*`,
             `💻 Language: *${info.language || 'N/A'}*`,
             `🌿 Branch: *${branch}*`,
-            `📏 Size: *${sizeMB}MB*`,
+            `📏 Size: *${actualMB}MB*`,
             ``,
             `🔗 ${info.html_url}`,
           ].join('\n'),
