@@ -1,6 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════
 // downloader.js — Firekid XMD  
 // YOUR RAILWAY COBALT INSTANCE + fallbacks
+// Music (.play) powered by JioSaavn API
 // ═══════════════════════════════════════════════════════════════════════
 
 // ── Size limits (WhatsApp) ────────────────────────────────────────────
@@ -11,6 +12,43 @@ const MAX_VIDEO_MB = 64
 const checkSize = (buf, maxMB, label = 'File') => {
   if (buf.length > maxMB * MB)
     throw new Error(`${label} too large (${(buf.length / MB).toFixed(1)} MB). Max allowed: ${maxMB} MB.`)
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// JIOSAAVN — music search + MP3 download (no key needed)
+// ─────────────────────────────────────────────────────────────────────
+const SAAVN_BASE = 'https://jiosaavn-apifg.vercel.app'
+
+async function saavnSearch(query, limit = 5) {
+  const res = await fetch(
+    `${SAAVN_BASE}/api/search/songs?query=${encodeURIComponent(query)}&limit=${limit}`,
+    {
+      headers: { 'User-Agent': 'FirekidXMD/2.0' },
+      signal: AbortSignal.timeout(15_000),
+    }
+  )
+  if (!res.ok) throw new Error(`JioSaavn search failed (HTTP ${res.status})`)
+  const data = await res.json()
+  const results = data?.data?.results
+  if (!results?.length) return null
+  return results
+}
+
+function getBestDownloadUrl(song) {
+  const dlUrls = song.downloadUrl || []
+  const best =
+    dlUrls.find(u => u.quality === '320kbps') ||
+    dlUrls.find(u => u.quality === '160kbps') ||
+    dlUrls.find(u => u.quality === '96kbps')  ||
+    dlUrls[dlUrls.length - 1]
+  return best || null
+}
+
+function formatDuration(seconds) {
+  if (!seconds) return 'N/A'
+  const m = Math.floor(seconds / 60)
+  const s = String(seconds % 60).padStart(2, '0')
+  return `${m}:${s}`
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -226,7 +264,7 @@ function gdriveDirect(url) {
 // ─────────────────────────────────────────────────────────────────────
 
 export default [
-  // ── TikTok (Use your specialized TikTok API, NOT Cobalt) ────────────
+  // ── TikTok ─────────────────────────────────────────────────────────
   {
     command: 'tiktok',
     aliases: ['tt', 'ttdl'],
@@ -242,8 +280,6 @@ export default [
       const wait = await sock.sendMessage(ctx.from, { text: '⏳ Downloading TikTok video...' }, { quoted: msg })
 
       try {
-        // TODO: Replace with your actual TikTok API
-        // For now using Cobalt as fallback (but you should use your specialized API)
         const { mediaUrl } = await cobalt(url, { videoQuality: '720' })
         
         const vidBuf = await fetch(mediaUrl).then(r => r.arrayBuffer()).then(b => Buffer.from(b))
@@ -264,7 +300,7 @@ export default [
     }
   },
 
-  // ── Universal Downloader (Instagram, Twitter, Facebook, YouTube, etc.) ──
+  // ── Universal Downloader ───────────────────────────────────────────
   {
     command: 'download',
     aliases: ['dl', 'get'],
@@ -434,6 +470,24 @@ export default [
         text: `⏳ Downloading ${isAudio ? 'audio' : 'video'} from YouTube...` 
       }, { quoted: msg })
 
+      // Detect if it's a full-length video (not a Short)
+      const isShort = url.includes('/shorts/') || url.includes('youtu.be/')
+      if (isAudio && !isShort) {
+        await sock.sendMessage(ctx.from, {
+          edit: wait.key,
+          text: [
+            `⚠️ *YouTube MP3 Unavailable*`,
+            ``,
+            `Full-length YouTube videos are blocked by YouTube's anti-bot system on server IPs.`,
+            ``,
+            `✅ *Try instead:*`,
+            `• ${ctx.prefix}play <song name> — searches JioSaavn and downloads MP3 directly`,
+            `• ${ctx.prefix}ytmp3 <youtube shorts url> — Shorts still work`,
+          ].join('\n')
+        })
+        return
+      }
+
       try {
         const opts = isAudio ? { downloadMode: 'audio', audioFormat: 'mp3' } : { videoQuality: '720' }
         const { mediaUrl, type } = await cobalt(url, opts)
@@ -458,7 +512,13 @@ export default [
       } catch (e) {
         await sock.sendMessage(ctx.from, {
           edit: wait.key,
-          text: `❌ *YouTube download failed*\n\n${e.message}\n\n⚠️ Note: YouTube has aggressive rate limits. Try again later.`
+          text: [
+            `❌ *YouTube download failed*`,
+            ``,
+            `${e.message}`,
+            ``,
+            `💡 *Tip:* Use *${ctx.prefix}play <song name>* to download music instead — it uses JioSaavn and works reliably.`,
+          ].join('\n')
         })
       }
     }
@@ -616,7 +676,7 @@ export default [
           `*Title:* ${info.title}`,
           `*Artist:* ${info.artist}`,
           ``,
-          `⚠️ _Spotify downloads not supported. Listen on Spotify app._`
+          `💡 _Use ${ctx.prefix}play ${info.title} to download this song_`
         ].join('\n')
 
         if (info.thumbnail) {
@@ -653,6 +713,32 @@ export default [
       const wait = await sock.sendMessage(ctx.from, { text: `🔍 Searching for *"${ctx.query}"*...` }, { quoted: msg })
 
       try {
+        // Search JioSaavn first (more reliable for music)
+        const saavnResults = await saavnSearch(ctx.query, 5).catch(() => null)
+
+        if (saavnResults?.length) {
+          const lines = [
+            `🎵 *Music Search Results*`,
+            `${'─'.repeat(30)}`,
+            `🔎 Query: _${ctx.query}_`,
+            ``
+          ]
+
+          saavnResults.forEach((s, i) => {
+            const artist = s.primaryArtists || s.artists?.primary?.map(a => a.name).join(', ') || 'Unknown'
+            const dur = formatDuration(s.duration)
+            lines.push(`*${i + 1}.* 🎶 ${s.name}`)
+            lines.push(`   🎤 ${artist}`)
+            lines.push(`   ⏱️ ${dur}`)
+            lines.push(``)
+          })
+
+          lines.push(`_Use *${ctx.prefix}play <song name>* to download_`)
+          await sock.sendMessage(ctx.from, { edit: wait.key, text: lines.join('\n') })
+          return
+        }
+
+        // Fallback to YouTube search
         const results = await youtubeSearch(ctx.query + ' song', 6)
 
         if (!results.length) {
@@ -689,7 +775,7 @@ export default [
     }
   },
 
-  // ── Play (search by name + download as audio) ─────────────────────
+  // ── Play (search by name + download via JioSaavn) ─────────────────
   {
     command: 'play',
     aliases: ['playmusic', 'music', 'mp3'],
@@ -697,68 +783,64 @@ export default [
     handler: async (sock, msg, ctx) => {
       if (!ctx.query) {
         return sock.sendMessage(ctx.from, {
-          text: `🎵 *Play Music*\n\n📌 *Usage:* ${ctx.prefix}play <song name>\n\n_Example: ${ctx.prefix}play Blinding Lights_\n\n_Searches YouTube and downloads as MP3._`
+          text: `🎵 *Play Music*\n\n📌 *Usage:* ${ctx.prefix}play <song name>\n\n_Example: ${ctx.prefix}play Blinding Lights_\n\n_Searches JioSaavn and downloads as MP3._`
         }, { quoted: msg })
       }
 
       const wait = await sock.sendMessage(ctx.from, { text: `🔍 Searching for *"${ctx.query}"*...` }, { quoted: msg })
 
       try {
-        // Step 1: Search YouTube for the song
-        const results = await youtubeSearch(ctx.query + ' song', 3)
-        if (!results.length) {
+        // Step 1: Search JioSaavn
+        const results = await saavnSearch(ctx.query, 5)
+        if (!results) {
           return sock.sendMessage(ctx.from, {
             edit: wait.key,
-            text: `❌ No results found for *"${ctx.query}"*`
+            text: `❌ No results found for *"${ctx.query}"*\n\n_Try a different song name_`
           })
         }
 
-        const top = results[0]
+        const song   = results[0]
+        const title  = song.name || 'Unknown'
+        const artist = song.primaryArtists || song.artists?.primary?.map(a => a.name).join(', ') || 'Unknown'
+        const dur    = formatDuration(song.duration)
 
         await sock.sendMessage(ctx.from, {
           edit: wait.key,
-          text: `🎵 Found: *${top.title}*\n⬇️ Downloading audio...`
+          text: `🎵 Found: *${title}* — ${artist}\n⬇️ Downloading...`
         })
 
-        // Step 2: Get download URL from Cobalt
-        const { mediaUrl } = await cobalt(top.url, {
-          downloadMode: 'audio',
-          audioFormat:  'mp3',
-          audioBitrate: '128',
-        })
+        // Step 2: Get best quality download URL
+        const best = getBestDownloadUrl(song)
+        if (!best?.url) throw new Error('No download URL returned for this song — try a different name')
 
-        // Step 3: Download the buffer — cobalt stream URLs expire fast, need timeout + proper headers
-        const audioRes = await fetch(mediaUrl, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'audio/mpeg, audio/*, */*',
-          },
+        // Step 3: Download audio buffer
+        const audioRes = await fetch(best.url, {
+          headers: { 'User-Agent': 'Mozilla/5.0' },
           signal: AbortSignal.timeout(60_000),
         })
-
         if (!audioRes.ok) throw new Error(`Audio download failed (HTTP ${audioRes.status})`)
 
         const buf = Buffer.from(await audioRes.arrayBuffer())
-        if (buf.length < 1000) throw new Error('Downloaded file is too small — cobalt may have returned an error page')
-
+        if (buf.length < 1000) throw new Error('Downloaded file too small — JioSaavn may have returned an error')
         checkSize(buf, MAX_AUDIO_MB, 'Audio')
 
-        // Step 4: Send the audio
+        // Step 4: Send audio
         await sock.sendMessage(ctx.from, {
           audio:    buf,
           mimetype: 'audio/mpeg',
           ptt:      false,
         }, { quoted: msg })
 
-        // Step 5: Update the wait message
+        // Step 5: Update wait message
         await sock.sendMessage(ctx.from, {
           edit: wait.key,
           text: [
             `✅ *Downloaded*`,
             ``,
-            `🎶 ${top.title}`,
-            `📺 ${top.channel}`,
-            `⏱️ ${top.duration || 'N/A'}`,
+            `🎶 ${title}`,
+            `🎤 ${artist}`,
+            `⏱️ ${dur}`,
+            `🎧 ${best.quality}`,
           ].join('\n')
         })
       } catch (e) {
