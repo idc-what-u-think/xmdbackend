@@ -1,7 +1,7 @@
 import { handleGameMessage as handleWCG } from './wcg.js'
 import { activeSessions } from './games.js'
 
-export const handleGameMessage = async (sock, msg, ctx) => {
+const handleGameMessage = async (sock, msg, ctx) => {
   if (ctx.fromMe) return
   if (ctx.isCmd) return
 
@@ -32,3 +32,5 @@ export const handleGameMessage = async (sock, msg, ctx) => {
     })
   }
 }
+
+export default { onMessage: handleGameMessage }
