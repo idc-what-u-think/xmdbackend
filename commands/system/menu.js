@@ -65,7 +65,7 @@ const buildMenu = (prefix, botName, uptime, ram, ping, mode, name, cmdCount, pla
     section('AI & CHAT', ['ai','groq','gemini','gpt','deepseek','think','debate','roast','story','poem','rap','translate','summarize','fix','explain'], prefix),
 
     // ── Downloaders
-    section('DOWNLOADER', ['play','video','ytmp3','ytmp4','fb','ig','tt','twitter','pin','spotify','apk','gdrive'], prefix),
+    section('DOWNLOADER', ['play','searchmusic','video','ytmp3','ytmp4','fb','ig','tt','twitter','pin','spotify','apk','gdrive'], prefix),
 
     // ── Search & Lookup
     section('SEARCH & LOOKUP', ['google','wiki','define','news','weather','imdb','lyrics','gsmarena','ytsearch','bing'], prefix),
