@@ -1,4 +1,5 @@
 import { downloadMediaMessage } from '@whiskeysockets/baileys'
+import { setLidMapping } from '../../src/lib/ctx.js'
 
 const PRIVACY_VALUES = {
   lastseen:     { options: ['all', 'contacts', 'contact_blacklist', 'none'],  method: 'updateLastSeenPrivacy' },
@@ -80,7 +81,6 @@ export default [
 
       // Seed the lid→phone cache so .sudo works immediately after this
       if (targetRaw.endsWith('@lid') && resolvedPhone) {
-        const { setLidMapping } = await import('../../src/lib/ctx.js')
         setLidMapping(targetRaw, resolvedPhone)
       }
 
