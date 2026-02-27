@@ -419,6 +419,13 @@ const HELP = {
     usage: 'Reply to a view once + .vv2',
     note: 'Completely silent — no trace left in the chat.',
   },
+  save: {
+    category: 'Tools',
+    desc: 'Reply to someone\'s WhatsApp status to download it and send it in the current chat.',
+    usage: 'Reply to a status + .save',
+    example: '.save (replied to a status photo/video)',
+    note: 'Supports photos, videos, audio, and text statuses.',
+  },
   play: {
     category: 'Downloader',
     desc: 'Search YouTube by song name and download it as an MP3 audio file in one command.',
