@@ -1,7 +1,14 @@
 // commands/tools/sendstatus.js
 // .sendstatus — reply to any message (text/image/video) to repost it as your WA status
-// Uses sock.sendMessage('status@broadcast', ...) — supported in Baileys 6.7+
-// Optional: .sendstatus <text>  — posts a text status directly
+//
+// ROOT CAUSE OF OLD BUG:
+//   font/backgroundColor/statusJidList/broadcast were placed in the MESSAGE BODY (2nd arg).
+//   Baileys requires them in the OPTIONS (3rd arg).
+//   Also: statusJidList MUST be a real populated array — empty [] = nothing posts.
+//
+// FIX:
+//   All status options moved to 3rd arg.
+//   statusJidList built from sock.contacts (Baileys' internal contact store).
 
 import { downloadContentFromMessage } from '@whiskeysockets/baileys'
 
@@ -12,10 +19,27 @@ const toBuffer = async (msg, type) => {
   return Buffer.concat(chunks)
 }
 
+// Build the statusJidList from Baileys' internal contact store.
+// sock.contacts is populated from history sync automatically.
+// Falls back to owner JID only if contacts haven't synced yet.
+const getStatusJidList = (sock) => {
+  const contacts = sock.contacts || {}
+  const jids = Object.keys(contacts).filter(j => j.endsWith('@s.whatsapp.net'))
+  if (jids.length > 0) return jids
+  // Fallback — at minimum send to ourselves so the status actually posts
+  const ownerJid = (process.env.OWNER_NUMBER || '2348064610975') + '@s.whatsapp.net'
+  return [ownerJid]
+}
+
+const STATUS_OPTIONS = (sock) => ({
+  broadcast:     true,
+  statusJidList: getStatusJidList(sock),
+})
+
 export default [
   {
     command: 'sendstatus',
-    aliases: ['poststatus', 'setstatus', 'status', 'mystatus'],
+    aliases: ['poststatus', 'setstatus', 'mystatus'],
     category: 'tools',
     handler: async (sock, msg, ctx, { api }) => {
       const quotedMsg  = ctx.quoted?.message
@@ -26,16 +50,16 @@ export default [
         const ph = await sock.sendMessage(ctx.from, { text: '📢 Posting to your status...' }, { quoted: msg })
 
         try {
-          // Text message
+          // ── Text ──────────────────────────────────────────────────────────
           if (quotedType === 'conversation' || quotedType === 'extendedTextMessage') {
             const text = ctx.quotedBody?.trim()
             if (!text) throw new Error('No text found in quoted message')
 
-            await sock.sendMessage('status@broadcast', {
-              text,
-              font: 1,
-              backgroundColor: '#1DA462',
-            })
+            await sock.sendMessage(
+              'status@broadcast',
+              { text },
+              { ...STATUS_OPTIONS(sock), backgroundColor: '#1DA462', font: 2 }
+            )
 
             await sock.sendMessage(ctx.from, {
               edit: ph.key,
@@ -44,16 +68,17 @@ export default [
             return
           }
 
-          // Image message
+          // ── Image ──────────────────────────────────────────────────────────
           if (quotedType === 'imageMessage') {
             const imageMsg = quotedMsg.imageMessage
-            const buf = await toBuffer(imageMsg, 'image')
-            const caption = imageMsg.caption || ctx.query?.trim() || ''
+            const buf      = await toBuffer(imageMsg, 'image')
+            const caption  = imageMsg.caption || ctx.query?.trim() || ''
 
-            await sock.sendMessage('status@broadcast', {
-              image: buf,
-              caption,
-            })
+            await sock.sendMessage(
+              'status@broadcast',
+              { image: buf, caption },
+              STATUS_OPTIONS(sock)
+            )
 
             await sock.sendMessage(ctx.from, {
               edit: ph.key,
@@ -62,20 +87,20 @@ export default [
             return
           }
 
-          // Video message
+          // ── Video ──────────────────────────────────────────────────────────
           if (quotedType === 'videoMessage') {
             const videoMsg = quotedMsg.videoMessage
-            // WhatsApp status videos must be ≤ 30 seconds
-            const secs = videoMsg.seconds || 0
+            const secs     = videoMsg.seconds || 0
             if (secs > 30) throw new Error(`Video is ${secs}s — WhatsApp status limit is 30 seconds`)
 
-            const buf = await toBuffer(videoMsg, 'video')
+            const buf     = await toBuffer(videoMsg, 'video')
             const caption = videoMsg.caption || ctx.query?.trim() || ''
 
-            await sock.sendMessage('status@broadcast', {
-              video: buf,
-              caption,
-            })
+            await sock.sendMessage(
+              'status@broadcast',
+              { video: buf, caption },
+              STATUS_OPTIONS(sock)
+            )
 
             await sock.sendMessage(ctx.from, {
               edit: ph.key,
@@ -84,16 +109,16 @@ export default [
             return
           }
 
-          // Audio / voice note
+          // ── Audio ──────────────────────────────────────────────────────────
           if (quotedType === 'audioMessage') {
             const audioMsg = quotedMsg.audioMessage
-            const buf = await toBuffer(audioMsg, 'audio')
+            const buf      = await toBuffer(audioMsg, 'audio')
 
-            await sock.sendMessage('status@broadcast', {
-              audio: buf,
-              mimetype: audioMsg.mimetype || 'audio/ogg; codecs=opus',
-              ptt: audioMsg.ptt || false,
-            })
+            await sock.sendMessage(
+              'status@broadcast',
+              { audio: buf, mimetype: audioMsg.mimetype || 'audio/ogg; codecs=opus', ptt: false },
+              STATUS_OPTIONS(sock)
+            )
 
             await sock.sendMessage(ctx.from, {
               edit: ph.key,
@@ -102,14 +127,16 @@ export default [
             return
           }
 
-          // Sticker → convert to image for status
+          // ── Sticker → post as image ────────────────────────────────────────
           if (quotedType === 'stickerMessage') {
             const stickerMsg = quotedMsg.stickerMessage
-            const buf = await toBuffer(stickerMsg, 'sticker')
+            const buf        = await toBuffer(stickerMsg, 'sticker')
 
-            await sock.sendMessage('status@broadcast', {
-              image: buf,
-            })
+            await sock.sendMessage(
+              'status@broadcast',
+              { image: buf },
+              STATUS_OPTIONS(sock)
+            )
 
             await sock.sendMessage(ctx.from, {
               edit: ph.key,
@@ -133,11 +160,11 @@ export default [
       const text = ctx.query?.trim()
       if (text) {
         try {
-          await sock.sendMessage('status@broadcast', {
-            text,
-            font: 1,
-            backgroundColor: '#1DA462',
-          })
+          await sock.sendMessage(
+            'status@broadcast',
+            { text },
+            { ...STATUS_OPTIONS(sock), backgroundColor: '#1DA462', font: 2 }
+          )
           await sock.sendMessage(ctx.from, {
             text: `✅ *Status Posted!*\n\n📝 _"${text.slice(0, 80)}${text.length > 80 ? '...' : ''}"_\n\n_Visible to your WA contacts_`
           }, { quoted: msg })
