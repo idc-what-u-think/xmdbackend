@@ -1,4 +1,4 @@
-import { setModeMemory } from '../../src/lib/handler.js'
+import { setModeMemory, addSudoMemory, delSudoMemory } from '../../src/lib/handler.js'
 import { lidPhoneCache } from '../../src/lib/ctx.js'
 
 // ── Resolve a real phone number from a possibly-@lid JID ─────────────────────
@@ -65,6 +65,7 @@ export default [
           `🔒 *Bot Mode: PRIVATE*`, ``,
           `✅ Bot is now restricted to owner only.`,
           `Other users will be ignored immediately.`, ``,
+          `_Sudo users can still use the bot in private mode._`,
           `_Use ${ctx.prefix}mode-public to open access_`
         ].join('\n')
       }, { quoted: msg })
@@ -104,6 +105,9 @@ export default [
         await api.sessionSet('sudo_list', JSON.stringify(sudoList))
       }
 
+      // ── Keep in-memory sudo list in sync so private mode gate works instantly ──
+      addSudoMemory(normalised)
+
       // Show the real phone number so owner can confirm it resolved correctly
       const displayNum = normalised.replace('@s.whatsapp.net', '')
       await sock.sendMessage(ctx.from, {
@@ -111,7 +115,7 @@ export default [
           `✅ *Sudo Access Granted*`, ``,
           `👤 @${targetJid.split('@')[0]} is now a sudo user.`,
           `📱 Stored as: +${displayNum}`, ``,
-          `They can now use restricted commands.`,
+          `They can now use restricted commands even in private mode.`,
           `_Sudo users: ${sudoList.length}_`
         ].join('\n'),
         mentions: [targetJid]
@@ -146,6 +150,9 @@ export default [
       const sudoList = listRes?.value ? JSON.parse(listRes.value) : []
       const updated = sudoList.filter(j => j !== normalised)
       await api.sessionSet('sudo_list', JSON.stringify(updated))
+
+      // ── Keep in-memory sudo list in sync ──
+      delSudoMemory(normalised)
 
       await sock.sendMessage(ctx.from, {
         text: [
