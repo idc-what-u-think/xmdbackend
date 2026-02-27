@@ -10,7 +10,37 @@
 if (!globalThis._wcgGames) globalThis._wcgGames = new Map()
 const activeGames = globalThis._wcgGames
 
-const TURN_TIMEOUT_MS = 20_000
+// ── Timer escalation ──────────────────────────────────────────────────────────
+// Rounds 1–3:  20s
+// Rounds 4–6:  15s
+// Rounds 7–9:  10s  (+ 35% chance second-to-last letter)
+// Round  10+:   7s  (+ 35% chance second-to-last letter) — floor, never goes lower
+const getTurnTimeout = (round) => {
+  if (round <= 3) return 20_000
+  if (round <= 6) return 15_000
+  if (round <= 9) return 10_000
+  return 7_000
+}
+
+const getTurnTimeoutLabel = (round) => {
+  if (round <= 3) return '20s'
+  if (round <= 6) return '15s'
+  if (round <= 9) return '10s'
+  return '7s'
+}
+
+// ── Letter selection ──────────────────────────────────────────────────────────
+// At round 7+ (10s and 7s tiers), 35% chance the required letter is the
+// second-to-last letter of the current word instead of the last.
+// Falls back to last letter if word is only 1 character.
+export const getNextLetter = (word, round) => {
+  if (round >= 7 && word.length >= 2 && Math.random() < 0.35) {
+    return word[word.length - 2]
+  }
+  return word[word.length - 1]
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 const MIN_PLAYERS     = 2
 const MAX_PLAYERS     = 10
 const DICTIONARY_URL  = 'https://api.dictionaryapi.dev/api/v2/entries/en/'
@@ -45,6 +75,8 @@ export const startTimer = (sock, jid) => {
   const game = activeGames.get(jid)
   if (!game) return
 
+  const timeoutMs = getTurnTimeout(game.round)
+
   game.timer = setTimeout(async () => {
     const g = activeGames.get(jid)
     if (!g) return
@@ -75,18 +107,19 @@ export const startTimer = (sock, jid) => {
     if (g.turnIndex >= g.players.length) g.turnIndex = 0
     const next     = g.players[g.turnIndex]
     const nextName = g.names[next] || next.split('@')[0]
+    const timeLabel = getTurnTimeoutLabel(g.round)
 
     await sock.sendMessage(jid, {
       text: [
         `⏰ @${name} took too long! *Eliminated!*`, ``,
         `🔤 Last word: *${g.currentWord.toUpperCase()}*`,
         `➡️  Next letter: *${g.currentLetter.toUpperCase()}*`, ``,
-        `@${nextName} your turn! (20s) ⏱️`
+        `@${nextName} your turn! (${timeLabel}) ⏱️`
       ].join('\n'),
       mentions: [timedOut, next],
     })
     startTimer(sock, jid)
-  }, TURN_TIMEOUT_MS)
+  }, timeoutMs)
 }
 
 export default [
@@ -115,7 +148,8 @@ export default [
             `• Type a word starting with the last letter of the previous word`,
             `• No repeated words`,
             `• Must be a real English word`,
-            `• 20 seconds per turn or you're eliminated`, ``,
+            `• Timer: 20s (R1-3) → 15s (R4-6) → 10s (R7-9) → 7s (R10+)`,
+            `• At round 7+: 35% chance the required letter is second-to-last!`, ``,
             `_Example: APPLE → ELEPHANT → TIGER → RABBIT_`
           ].join('\n')
         }, { quoted: msg })
@@ -176,15 +210,16 @@ export default [
           return sock.sendMessage(ctx.from, { text: `❌ Need at least ${MIN_PLAYERS} players. Currently: ${game.players.length}` }, { quoted: msg })
 
         game.players.sort(() => Math.random() - 0.5)
-        game.status       = 'playing'
-        game.currentWord  = randomSeed()
-        game.currentLetter = game.currentWord[game.currentWord.length - 1]
-        game.turnIndex    = 0
-        game.usedWords    = new Set([game.currentWord])
-        game.round        = 1
+        game.status        = 'playing'
+        game.currentWord   = randomSeed()
+        game.round         = 1
+        game.currentLetter = getNextLetter(game.currentWord, game.round)
+        game.turnIndex     = 0
+        game.usedWords     = new Set([game.currentWord])
 
         const first     = game.players[0]
         const firstName = game.names[first] || first.split('@')[0]
+        const timeLabel = getTurnTimeoutLabel(game.round)
 
         await sock.sendMessage(ctx.from, {
           text: [
@@ -193,7 +228,7 @@ export default [
             game.players.map((p, i) => `${i + 1}. @${game.names[p] || p.split('@')[0]}`).join('\n'), ``,
             `🔤 Starting word: *${game.currentWord.toUpperCase()}*`,
             `➡️  Next letter: *${game.currentLetter.toUpperCase()}*`, ``,
-            `@${firstName} GO FIRST! (20s) ⏱️`, ``,
+            `@${firstName} GO FIRST! (${timeLabel}) ⏱️`, ``,
             `_Just type your word — no command needed!_`
           ].join('\n'),
           mentions: game.players,
@@ -250,15 +285,16 @@ export default [
         }
 
         if (game.turnIndex >= game.players.length) game.turnIndex = 0
-        const next     = game.players[game.turnIndex]
-        const nextName = game.names[next] || next.split('@')[0]
+        const next      = game.players[game.turnIndex]
+        const nextName  = game.names[next] || next.split('@')[0]
+        const timeLabel = getTurnTimeoutLabel(game.round)
 
         await sock.sendMessage(ctx.from, {
           text: [
             `🏳️ @${currName} skipped — *eliminated!*`, ``,
             `🔤 Last word: *${game.currentWord.toUpperCase()}*`,
             `➡️  Next letter: *${game.currentLetter.toUpperCase()}*`, ``,
-            `@${nextName} your turn! (20s) ⏱️`
+            `@${nextName} your turn! (${timeLabel}) ⏱️`
           ].join('\n'),
           mentions: [curr, next],
         }, { quoted: msg })
@@ -277,10 +313,14 @@ export default [
           return `${i + 1}. @${name}${p === curr ? ' ⬅️ TURN' : ''}`
         })
 
+        const timeLabel = game.status === 'playing' ? getTurnTimeoutLabel(game.round) : '20s'
+
         return sock.sendMessage(ctx.from, {
           text: [
             `👥 *WCG Players (${game.players.length})*`,
-            `Status: ${game.status === 'playing' ? '🎮 Playing' : '⏳ Waiting'}`, ``,
+            `Status: ${game.status === 'playing' ? '🎮 Playing' : '⏳ Waiting'}`,
+            game.status === 'playing' ? `⏱️ Timer: ${timeLabel} | Round: ${game.round}` : '',
+            ``,
             ...lines,
             game.status === 'playing' ? `\n🔤 Current word: *${game.currentWord?.toUpperCase()}*` : '',
           ].filter(s => s !== '').join('\n'),
