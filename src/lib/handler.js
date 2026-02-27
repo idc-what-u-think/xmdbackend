@@ -8,12 +8,23 @@ import { getCommand, getMessageListeners }   from './loader.js'
 
 let _botMode  = null          // null = not loaded yet; 'public' | 'private'
 let _blockSet = null          // null = not loaded yet; Set of blocked JIDs
+let _sudoList = null          // null = not loaded yet; Array of sudo JIDs
 
 // Export setters so mode.js / access.js can update memory instantly
 export const setModeMemory  = (mode)  => { _botMode = mode }
 export const setBlockMemory = (set)   => { _blockSet = set }
 export const addBlockMemory = (jid)   => { if (_blockSet) _blockSet.add(jid); else _blockSet = new Set([jid]) }
 export const delBlockMemory = (jid)   => { _blockSet?.delete(jid) }
+
+// Sudo list memory — kept in sync by mode.js add/remove operations
+export const setSudoMemory = (list)  => { _sudoList = list }
+export const addSudoMemory = (jid)   => {
+  if (_sudoList) { if (!_sudoList.includes(jid)) _sudoList.push(jid) }
+  else _sudoList = [jid]
+}
+export const delSudoMemory = (jid)   => {
+  if (_sudoList) _sudoList = _sudoList.filter(j => j !== jid)
+}
 
 // Cache accountId lookup per session (avoids Worker round-trip every message)
 let _accountId    = null
@@ -82,9 +93,38 @@ const getBlockSet = async (api) => {
   return _blockSet
 }
 
+// Sudo list: memory first, KV fallback, load once
+// Used as a fallback check when ctx.isSudo is false in private mode
+// (handles cases where LID resolution fails and plan lookup returns wrong JID)
+const getSudoList = async (api) => {
+  if (_sudoList !== null) return _sudoList
+  try {
+    const r = await api.sessionGet('sudo_list')
+    _sudoList = r?.value ? JSON.parse(r.value) : []
+  } catch {
+    _sudoList = []
+  }
+  return _sudoList
+}
+
 const isBlocked = async (api, jid) => {
   const set = await getBlockSet(api)
   return set.has(jid)
+}
+
+// Check if a sender is in the sudo list by matching phone number or JID
+// This is a fallback for when LID resolution fails and ctx.isSudo is incorrectly false
+const isSudoViaList = async (api, ctx) => {
+  const list = await getSudoList(api)
+  if (!list.length) return false
+  return list.some(j => {
+    if (!j) return false
+    // Match by exact JID
+    if (j === ctx.senderStorageJid || j === ctx.sender) return true
+    // Match by phone number digits (handles JID format differences)
+    const listNum = j.split('@')[0].replace(/\D/g, '')
+    return listNum.length > 4 && listNum === ctx.senderNumber
+  })
 }
 
 const loadPrefix = async (api, accountId) => {
@@ -101,6 +141,7 @@ export const resetHandlerCache = () => {
   _reactionsTtl = 0
   _botMode      = null   // force re-load from KV
   _blockSet     = null   // force re-load from KV
+  _sudoList     = null   // force re-load from KV
   _modeSyncTs   = 0
   _prefix       = null
 }
@@ -149,8 +190,19 @@ export const handleMessage = async (sock, msg, groupCache, planCache, api) => {
   if (!ctx.fromMe && !ctx.isOwner) {
     // 1. Mode check — memory first, KV fallback
     const mode = await getBotMode(api)
-    // Sudo users bypass private mode — only completely unknown users are blocked
-    if (mode === 'private' && !ctx.isSudo) return
+
+    if (mode === 'private' && !ctx.isSudo) {
+      // Fallback: check sudo_list KV directly
+      // This handles cases where LID resolution failed during plan lookup,
+      // causing the wrong JID to be queried and plan to come back as 'free'
+      const sudoCheck = await isSudoViaList(api, ctx)
+      if (!sudoCheck) return
+
+      // LID resolution was the issue — fix ctx so commands work correctly
+      ctx.isSudo    = true
+      ctx.isPremium = true
+      ctx.plan      = 'sudo'
+    }
 
     // 2. Block check — memory first, KV fallback (separate from D1 ban)
     const blocked = await isBlocked(api, ctx.sender) ||
@@ -201,12 +253,11 @@ export const handleMessage = async (sock, msg, groupCache, planCache, api) => {
   if (!ctx.command) return
 
   // ── Auto-React to Commands ──────────────────────────────────────────────────
-  // Reacts to command messages BEFORE sending response (command confirmation)
   if (accountId && ctx.isCmd) {
     try {
       const autoReact = await api.sessionGet('autoreact')
       if (autoReact?.value && autoReact.value !== 'off') {
-        const emoji = autoReact.value // e.g., '🔥', '✅', '⚡'
+        const emoji = autoReact.value
         await sock.sendMessage(ctx.from, {
           react: { text: emoji, key: msg.key }
         }).catch(() => {})
