@@ -1,10 +1,5 @@
-import { buildCtx, lidPhoneCache }            from './ctx.js'
+import { buildCtx }                          from './ctx.js'
 import { getCommand, getMessageListeners }   from './loader.js'
-
-// Re-export lidPhoneCache so xmdbackend commands can access it via
-// '../../src/lib/handler.js' — the only path the loader's patchSource rewrites.
-// Direct import of ctx.js from xmdbackend would not resolve at runtime.
-export { lidPhoneCache }
 
 // ── In-memory stores (survive handler calls, reset on restart) ───────────────
 // These are the source of truth. KV is the persistence layer.
@@ -72,9 +67,15 @@ const getBotMode = async (api) => {
 const getBlockSet = async (api) => {
   if (_blockSet !== null) return _blockSet
   try {
-    const r = await api.sessionGet('block_list')
-    const arr = r?.value ? JSON.parse(r.value) : []
-    _blockSet = new Set(arr)
+    // Load both block_list (WA-blocked) and stop_list (bot-only ignored) into
+    // the same in-memory set so the handler gate applies to both uniformly.
+    const [bRes, sRes] = await Promise.all([
+      api.sessionGet('block_list'),
+      api.sessionGet('stop_list'),
+    ])
+    const blocked  = bRes?.value ? JSON.parse(bRes.value) : []
+    const stopped  = sRes?.value ? JSON.parse(sRes.value) : []
+    _blockSet = new Set([...blocked, ...stopped])
   } catch {
     _blockSet = new Set()
   }
@@ -148,7 +149,8 @@ export const handleMessage = async (sock, msg, groupCache, planCache, api) => {
   if (!ctx.fromMe && !ctx.isOwner) {
     // 1. Mode check — memory first, KV fallback
     const mode = await getBotMode(api)
-    if (mode === 'private') return
+    // Sudo users bypass private mode — only completely unknown users are blocked
+    if (mode === 'private' && !ctx.isSudo) return
 
     // 2. Block check — memory first, KV fallback (separate from D1 ban)
     const blocked = await isBlocked(api, ctx.sender) ||
