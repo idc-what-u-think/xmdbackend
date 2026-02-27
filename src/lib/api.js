@@ -183,7 +183,12 @@ export const api = {
       body:   JSON.stringify({ listing_id: listingId }),
     }),
 
-  // Get user showcase cards
-  getShowcase: (accountId) =>
-    call(`/bot/cards/showcase?account_id=${encodeURIComponent(accountId)}`),
+  // Get user showcase cards — pass null accountId to get own showcase (uses FK key)
+  getShowcase: (accountId, category = 'anime') => {
+    if (accountId && accountId !== 'null') {
+      return call(`/bot/cards/showcase?account_id=${encodeURIComponent(accountId)}&category=${encodeURIComponent(category)}`)
+    }
+    // Own showcase — resolved server-side via FK key
+    return call(`/bot/cards/showcase-me?category=${encodeURIComponent(category)}`)
+  },
 }
