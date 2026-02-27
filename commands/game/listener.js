@@ -9,7 +9,7 @@
 //   game sessions for trivia/riddle are in games.js via globalThis._gameSessions
 
 import { activeSessions } from './games.js'
-import { startTimer }     from './wcg.js'
+import { startTimer, getNextLetter } from './wcg.js'
 
 const DICTIONARY_URL = 'https://api.dictionaryapi.dev/api/v2/entries/en/'
 
@@ -22,6 +22,14 @@ const isRealWord = async (word) => {
   } catch {
     return true
   }
+}
+
+// Returns the timer label string for the given round (mirrors wcg.js)
+const getTurnTimeoutLabel = (round) => {
+  if (round <= 3) return '20s'
+  if (round <= 6) return '15s'
+  if (round <= 9) return '10s'
+  return '7s'
 }
 
 const handleWCG = async (sock, msg, ctx) => {
@@ -63,15 +71,23 @@ const handleWCG = async (sock, msg, ctx) => {
   if (game.timer) { clearTimeout(game.timer); game.timer = null }
 
   game.usedWords.add(word)
-  game.currentWord   = word
-  game.currentLetter = word[word.length - 1]
-  game.turnIndex     = (game.turnIndex + 1) % game.players.length
+  game.currentWord = word
   game.round++
+  game.turnIndex   = (game.turnIndex + 1) % game.players.length
+
+  // ── Apply round-based letter selection ──────────────────────────────
+  // At round 7+ there is a 35% chance the next required letter is the
+  // second-to-last letter of the word instead of the last letter.
+  game.currentLetter = getNextLetter(word, game.round)
 
   const prevPlayer = curr
   const prevName   = game.names[prevPlayer] || prevPlayer.split('@')[0]
   const nextPlayer = game.players[game.turnIndex]
   const nextName   = game.names[nextPlayer] || nextPlayer.split('@')[0]
+  const timeLabel  = getTurnTimeoutLabel(game.round)
+
+  // Check if second-to-last letter was chosen (so we can tell players)
+  const usedSecondToLast = word.length >= 2 && game.currentLetter === word[word.length - 2]
 
   // React ✅ on correct word
   await sock.sendMessage(ctx.from, { react: { text: '✅', key: msg.key } })
@@ -79,11 +95,15 @@ const handleWCG = async (sock, msg, ctx) => {
   // 3 second pause before next turn prompt
   await new Promise(r => setTimeout(r, 3_000))
 
+  const letterNote = usedSecondToLast
+    ? `➡️  Next letter: *${game.currentLetter.toUpperCase()}* _(2nd to last of ${word.toUpperCase()})_ 🎲`
+    : `➡️  Next letter: *${game.currentLetter.toUpperCase()}*`
+
   await sock.sendMessage(ctx.from, {
     text: [
       `✅ *${word.toUpperCase()}* — @${prevName}`, ``,
-      `➡️  Next letter: *${game.currentLetter.toUpperCase()}*`,
-      `👤 @${nextName} your turn! (20s) ⏱️`, ``,
+      letterNote,
+      `👤 @${nextName} your turn! (${timeLabel}) ⏱️`, ``,
       `_Round ${game.round} | Words used: ${game.usedWords.size}_`
     ].join('\n'),
     mentions: [prevPlayer, nextPlayer],
