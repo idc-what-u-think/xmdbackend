@@ -76,7 +76,56 @@ export default [
     command: 'vv2',
     aliases: ['revealvideo', 'vov'],
     category: 'tools',
-    handler: vvHandler
+    handler: async (sock, msg, ctx, { api }) => {
+      const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage
+      if (!quotedMsg) {
+        await sock.sendMessage(ctx.from, { delete: msg.key })
+        return
+      }
+      const extracted = extractViewOnce(quotedMsg)
+      if (!extracted) {
+        await sock.sendMessage(ctx.from, { delete: msg.key })
+        return
+      }
+      const { msg: viewOnceMsg, type: mediaType } = extracted
+      let buffer
+      try {
+        const stream = await downloadContentFromMessage(viewOnceMsg, mediaType)
+        buffer = Buffer.from([])
+        for await (const chunk of stream) {
+          buffer = Buffer.concat([buffer, chunk])
+        }
+      } catch {
+        await sock.sendMessage(ctx.from, { delete: msg.key })
+        return
+      }
+      if (!buffer || buffer.length === 0) {
+        await sock.sendMessage(ctx.from, { delete: msg.key })
+        return
+      }
+
+      // Send to owner self-chat (your own chat with yourself)
+      const selfJid = (process.env.OWNER_NUMBER || ctx.ownerNumber) + '@s.whatsapp.net'
+      const origin = ctx.isGroup
+        ? (ctx.groupMeta?.subject || 'a group')
+        : `+${ctx.senderNumber}`
+
+      if (mediaType === 'image') {
+        await sock.sendMessage(selfJid, {
+          image:   buffer,
+          caption: viewOnceMsg.caption || `📸 View once from ${origin}`
+        })
+      } else {
+        await sock.sendMessage(selfJid, {
+          video:    buffer,
+          caption:  viewOnceMsg.caption || `🎥 View once from ${origin}`,
+          mimetype: viewOnceMsg.mimetype || 'video/mp4'
+        })
+      }
+
+      // Silently delete the .vv2 command from the chat
+      await sock.sendMessage(ctx.from, { delete: msg.key })
+    }
   },
 
   {
