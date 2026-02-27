@@ -637,4 +637,122 @@ export default [
       }
     }
   },
+
+  // ── Search Music ──────────────────────────────────────────────────
+  {
+    command: 'searchmusic',
+    aliases: ['musicsearch', 'findmusic', 'smusic'],
+    category: 'downloader',
+    handler: async (sock, msg, ctx) => {
+      if (!ctx.query) {
+        return sock.sendMessage(ctx.from, {
+          text: `🎵 *Search Music*\n\n📌 *Usage:* ${ctx.prefix}searchmusic <song name>\n\n_Example: ${ctx.prefix}searchmusic Blinding Lights_`
+        }, { quoted: msg })
+      }
+
+      const wait = await sock.sendMessage(ctx.from, { text: `🔍 Searching for *"${ctx.query}"*...` }, { quoted: msg })
+
+      try {
+        const results = await youtubeSearch(ctx.query + ' song', 6)
+
+        if (!results.length) {
+          return sock.sendMessage(ctx.from, {
+            edit: wait.key,
+            text: `❌ No results found for *"${ctx.query}"*`
+          })
+        }
+
+        const lines = [
+          `🎵 *Music Search Results*`,
+          `${'─'.repeat(30)}`,
+          `🔎 Query: _${ctx.query}_`,
+          ``
+        ]
+
+        results.forEach((v, i) => {
+          lines.push(`*${i + 1}.* 🎶 ${v.title}`)
+          lines.push(`   📺 ${v.channel}`)
+          lines.push(`   ⏱️ ${v.duration || 'N/A'} • 👁️ ${v.views || 'N/A'}`)
+          lines.push(`   🔗 ${v.url}`)
+          lines.push(``)
+        })
+
+        lines.push(`_Use *${ctx.prefix}play <song name>* to download_`)
+
+        await sock.sendMessage(ctx.from, { edit: wait.key, text: lines.join('\n') })
+      } catch (e) {
+        await sock.sendMessage(ctx.from, {
+          edit: wait.key,
+          text: `❌ Search failed: ${e.message}`
+        })
+      }
+    }
+  },
+
+  // ── Play (search by name + download as audio) ─────────────────────
+  {
+    command: 'play',
+    aliases: ['playmusic', 'music', 'mp3'],
+    category: 'downloader',
+    handler: async (sock, msg, ctx) => {
+      if (!ctx.query) {
+        return sock.sendMessage(ctx.from, {
+          text: `🎵 *Play Music*\n\n📌 *Usage:* ${ctx.prefix}play <song name>\n\n_Example: ${ctx.prefix}play Blinding Lights_\n\n_Searches YouTube and downloads as audio._`
+        }, { quoted: msg })
+      }
+
+      const wait = await sock.sendMessage(ctx.from, { text: `🔍 Searching for *"${ctx.query}"*...` }, { quoted: msg })
+
+      try {
+        // Search YouTube for the song
+        const results = await youtubeSearch(ctx.query + ' song', 3)
+        if (!results.length) {
+          return sock.sendMessage(ctx.from, {
+            edit: wait.key,
+            text: `❌ No results found for *"${ctx.query}"*`
+          })
+        }
+
+        const top = results[0]
+
+        await sock.sendMessage(ctx.from, {
+          edit: wait.key,
+          text: `⬇️ Downloading *${top.title}*...`
+        })
+
+        // Download as audio via Cobalt
+        const { mediaUrl } = await cobalt(top.url, {
+          downloadMode: 'audio',
+          audioFormat:  'mp3',
+          audioBitrate: '128',
+        })
+
+        const buf = await fetch(mediaUrl).then(r => r.arrayBuffer()).then(b => Buffer.from(b))
+        checkSize(buf, MAX_AUDIO_MB, 'Audio')
+
+        await sock.sendMessage(ctx.from, {
+          audio:    buf,
+          mimetype: 'audio/mpeg',
+          ptt:      false
+        })
+
+        // Edit the wait message to show what was downloaded
+        await sock.sendMessage(ctx.from, {
+          edit: wait.key,
+          text: [
+            `🎵 *Now Playing*`,
+            ``,
+            `🎶 ${top.title}`,
+            `📺 ${top.channel}`,
+            `⏱️ ${top.duration || 'N/A'}`,
+          ].join('\n')
+        })
+      } catch (e) {
+        await sock.sendMessage(ctx.from, {
+          edit: wait.key,
+          text: `❌ *Play failed*\n\n${e.message}`
+        })
+      }
+    }
+  },
 ]
