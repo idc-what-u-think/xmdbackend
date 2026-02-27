@@ -113,7 +113,7 @@ const buildMenu = (prefix, botName, uptime, ram, ping, mode, name, cmdCount, pla
     section('GAMES', ['truth','dare','8ball','rps','dice','coinflip','trivia','riddle','guess','wcg'], prefix),
 
     // ── Tools (extra)
-    section('TOOLS', ['tts','vv','vv2','tempmail','tempmail-inbox','url','qrcode','screenshot','carbon','obfuscate','sandbox','readmore','emojimix','sendstatus'], prefix),
+    section('TOOLS', ['tts','vv','vv2','save','tempmail','tempmail-inbox','url','qrcode','screenshot','carbon','obfuscate','sandbox','readmore','emojimix','sendstatus'], prefix),
 
     // ── Profile
     section('PROFILE', ['jid','gjid','setmyname','updatebio','getprivacy','setonline','setlastseen','groupsprivacy','setppall','savecontact'], prefix),
