@@ -1,78 +1,100 @@
-import { downloadMediaMessage, prepareWAMessageMedia, generateWAMessageFromContent } from '@whiskeysockets/baileys'
+import { downloadMediaMessage } from '@whiskeysockets/baileys'
 
 export default {
   command: 'gcstatus',
-  aliases: ['gcpost'],
+  aliases: ['gcpost', 'gstat'],
   groupOnly: true,
   adminOnly: true,
   handler: async (sock, msg, ctx, { api }) => {
     const reply = (text) => sock.sendMessage(ctx.from, { text }, { quoted: msg })
 
-    if (!ctx.quoted) return reply(`❌ Reply to an image, video, audio, or text to post as group status.\n📌 *Usage:* ${ctx.prefix}gcstatus (reply to media)`)
-
-    const qType = ctx.quotedType
+    if (!ctx.quoted) {
+      return reply(`❌ Reply to media or text to post as group status\n📌 *Usage:* ${ctx.prefix}gcstatus`)
+    }
 
     await sock.sendMessage(ctx.from, { react: { text: '⏳', key: msg.key } })
 
     try {
-      let messagePayload = {}
+      const qType = ctx.quotedType
+      let statusPayload = {}
 
-      if (qType === 'imageMessage' || qType === 'videoMessage' || qType === 'audioMessage') {
-        // Download quoted media to buffer
+      // Handle Images
+      if (qType === 'imageMessage') {
         const mediaBuffer = await downloadMediaMessage(
           ctx.quoted,
           'buffer',
           {},
           { logger: { level: 'silent', child: () => ({ level: 'silent', info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, trace: () => {}, fatal: () => {} }) } }
         )
-
-        // Build media options
-        let mediaOptions = {}
-        if (qType === 'imageMessage')      mediaOptions = { image: mediaBuffer, caption: ctx.query }
-        else if (qType === 'videoMessage') mediaOptions = { video: mediaBuffer, caption: ctx.query }
-        else if (qType === 'audioMessage') mediaOptions = { audio: mediaBuffer, mimetype: 'audio/mp4', ptt: false }
-
-        // Upload to WA servers
-        const preparedMedia = await prepareWAMessageMedia(mediaOptions, { upload: sock.waUploadToServer })
-
-        // Build inner message
-        let finalMediaMsg = {}
-        if (qType === 'imageMessage')      finalMediaMsg = { imageMessage: preparedMedia.imageMessage }
-        else if (qType === 'videoMessage') finalMediaMsg = { videoMessage: preparedMedia.videoMessage }
-        else if (qType === 'audioMessage') finalMediaMsg = { audioMessage: preparedMedia.audioMessage }
-
-        messagePayload = { groupStatusMessageV2: { message: finalMediaMsg } }
-
-      } else if (qType === 'conversation' || qType === 'extendedTextMessage') {
-        const textContent = ctx.quotedBody
-        if (!textContent) return reply('❌ Quoted message has no text content.')
-
-        const randomHex = Math.floor(Math.random() * 0xFFFFFF).toString(16).padStart(6, '0')
-        messagePayload = {
-          groupStatusMessageV2: {
-            message: {
-              extendedTextMessage: {
-                text: textContent,
-                backgroundArgb: 0xFF000000 + parseInt(randomHex, 16),
-                font: Math.floor(Math.random() * 5)
-              }
-            }
+        
+        statusPayload = {
+          groupStatusMessage: {
+            image: mediaBuffer,
+            caption: ctx.query || ''
           }
         }
-
-      } else {
-        return reply('❌ Unsupported media type. Reply to an image, video, audio, or text.')
+      }
+      // Handle Videos
+      else if (qType === 'videoMessage') {
+        const mediaBuffer = await downloadMediaMessage(
+          ctx.quoted,
+          'buffer',
+          {},
+          { logger: { level: 'silent', child: () => ({ level: 'silent', info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, trace: () => {}, fatal: () => {} }) } }
+        )
+        
+        statusPayload = {
+          groupStatusMessage: {
+            video: mediaBuffer,
+            caption: ctx.query || ''
+          }
+        }
+      }
+      // Handle Audio
+      else if (qType === 'audioMessage') {
+        const mediaBuffer = await downloadMediaMessage(
+          ctx.quoted,
+          'buffer',
+          {},
+          { logger: { level: 'silent', child: () => ({ level: 'silent', info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, trace: () => {}, fatal: () => {} }) } }
+        )
+        
+        statusPayload = {
+          groupStatusMessage: {
+            audio: mediaBuffer,
+            ptt: false
+          }
+        }
+      }
+      // Handle Text
+      else if (qType === 'conversation' || qType === 'extendedTextMessage') {
+        const textContent = ctx.quotedBody
+        if (!textContent) return reply('❌ Quoted message has no text content.')
+        
+        // Random background colors (hex colors)
+        const bgColors = ['#FF5733', '#33FF57', '#3357FF', '#FF33A1', '#33FFF5', '#F5FF33', '#9933FF']
+        const randomBg = bgColors[Math.floor(Math.random() * bgColors.length)]
+        
+        statusPayload = {
+          groupStatusMessage: {
+            text: textContent,
+            backgroundColor: randomBg,
+            font: Math.floor(Math.random() * 5)
+          }
+        }
+      }
+      else {
+        return reply('❌ Unsupported type. Reply to image/video/audio/text.')
       }
 
-      // Generate and relay
-      const outMsg = generateWAMessageFromContent(ctx.from, messagePayload, { userJid: sock.user.id })
-      await sock.relayMessage(ctx.from, outMsg.message, { messageId: outMsg.key.id })
+      // Send directly (Joy's approach)
+      await sock.sendMessage(ctx.from, statusPayload)
       await sock.sendMessage(ctx.from, { react: { text: '✅', key: msg.key } })
 
     } catch (e) {
-      console.error('[gcstatus]', e.message)
+      console.error('[gcstatus]', e)
       await sock.sendMessage(ctx.from, { react: { text: '❌', key: msg.key } })
-      reply(`❌ Failed to post group status: ${e.message}`)
+      reply(`❌ Failed: ${e.message}`)
     }
   }
 }
