@@ -21,7 +21,7 @@ export default {
     const quoted = ctx.quoted
     if (!quoted && !ctx.query) {
       console.log('[JOYMETHOD] ❌ No quoted message and no query')
-      return reply("❌ **Usage:** Reply to media or type text.")
+      return reply("❌ **Usage:** Test Joy.")
     }
 
     const isImage = ctx.quotedType === 'imageMessage'
