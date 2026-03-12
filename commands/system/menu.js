@@ -1,14 +1,9 @@
-const MENU_IMAGES = [
-  'https://i.ibb.co/n81GNX2q/photo-1-2026-02-21-16-33-08.jpg',
-  'https://i.ibb.co/jPSrqT0M/photo-2-2026-02-21-16-33-08.jpg',
-  'https://i.ibb.co/1fFBtT8T/photo-3-2026-02-21-16-33-08.jpg',
-  'https://i.ibb.co/TDbkbVM4/photo-4-2026-02-21-16-33-08.jpg',
-  'https://i.ibb.co/V0Z67w1k/photo-5-2026-02-21-16-33-08.jpg',
-  'https://i.ibb.co/Vcjtr25J/photo-6-2026-02-21-16-33-08.jpg',
-  'https://i.ibb.co/Hf4vWL7Z/photo-7-2026-02-21-16-33-08.jpg',
+const MENU_VIDEOS = [
+  'https://files.catbox.moe/u3aw04.mp4',
+  'https://files.catbox.moe/wcfmxn.mp4',
 ]
 
-const randomImage = () => MENU_IMAGES[Math.floor(Math.random() * MENU_IMAGES.length)]
+const randomVideo = () => MENU_VIDEOS[Math.floor(Math.random() * MENU_VIDEOS.length)]
 
 const formatUptime = (s) => {
   const d = Math.floor(s / 86400)
@@ -98,7 +93,7 @@ const buildMenu = (prefix, botName, uptime, ram, ping, mode, name, cmdCount, pla
     section('GAMING', ['sensitivity'], prefix),
 
     // ── Group
-    section('GROUP', ['add','kick','promote','demote','tagall','hidetag','mute','unmute','lock','unlock','invite','revoke','kickall','leavegc','groupname','groupdesc','listmembers','admins','warn','resetwarn','warnlist','poll'], prefix),
+    section('GROUP', ['add','kick','promote','demote','tagall','hidetag','mute','unmute','lock','unlock','invite','revoke','kickall','leavegc','groupname','groupdesc','listmembers','admins','warn','resetwarn','warnlist','poll','gcstatus'], prefix),
 
     // ── Anti / Protection
     section('ANTI / PROTECT', ['antilink','antisticker','antinsfw','antimedia','antibad','addbadword','delbadword','badwordlist','antibug','anticall','floodblock','antitemu','antidelete'], prefix),
@@ -177,7 +172,7 @@ export default [
       )
 
       await sock.sendMessage(ctx.from, {
-        image:    { url: randomImage() },
+        video:    { url: randomVideo() },
         caption:  menuText,
         mentions: [ctx.sender],
       }, { quoted: msg })
