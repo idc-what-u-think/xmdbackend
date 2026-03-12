@@ -214,6 +214,14 @@ const HELP = {
   resetwarn: { category: 'Group', desc: 'Clear all warnings from a member.', usage: '.resetwarn @user', flags: 'adminOnly' },
   warnlist: { category: 'Group', desc: 'View warned members.', usage: '.warnlist [@user]', flags: 'adminOnly' },
   poll: { category: 'Group', desc: 'Create a poll.', usage: '.poll Question | Option1 | Option2', note: 'Max 12 options.', flags: 'groupOnly' },
+  gcstatus: {
+    category: 'Group',
+    desc: 'Post a replied image, video, audio, or text message as a WhatsApp group status.',
+    usage: '.gcstatus (reply to media or text)',
+    example: '.gcstatus (reply to an image)\n.gcpost (alias)',
+    note: 'Text statuses get a random background color and font. Bot must be in the group.',
+    flags: 'adminOnly, groupOnly',
+  },
   listmembers: { category: 'Group', desc: 'List all group members with roles.', usage: '.listmembers', flags: 'groupOnly' },
   admins: { category: 'Group', desc: 'List all admins.', usage: '.admins', flags: 'groupOnly' },
 
