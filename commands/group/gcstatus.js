@@ -1,8 +1,8 @@
 import { downloadMediaMessage } from '@whiskeysockets/baileys'
 
 export default {
-  command: 'gcstatus',
-  aliases: ['gcpost', 'gstat'],
+  command: 'groupstatus',
+  aliases: ['gstatus'],
   groupOnly: true,
   adminOnly: true,
   handler: async (sock, msg, ctx, { api }) => {
@@ -17,6 +17,7 @@ export default {
     try {
       const qType = ctx.quotedType
       let statusPayload = {}
+      let fallbackPayload = {} // For groups without linked channels
 
       // Handle Images
       if (qType === 'imageMessage') {
@@ -32,6 +33,12 @@ export default {
             image: mediaBuffer,
             caption: ctx.query || ''
           }
+        }
+        
+        fallbackPayload = {
+          image: mediaBuffer,
+          caption: `📢 *GROUP ANNOUNCEMENT*\n\n${ctx.query || ''}`,
+          mentions: ctx.groupMeta?.participants?.map(p => p.id) || []
         }
       }
       // Handle Videos
@@ -49,6 +56,12 @@ export default {
             caption: ctx.query || ''
           }
         }
+        
+        fallbackPayload = {
+          video: mediaBuffer,
+          caption: `📢 *GROUP ANNOUNCEMENT*\n\n${ctx.query || ''}`,
+          mentions: ctx.groupMeta?.participants?.map(p => p.id) || []
+        }
       }
       // Handle Audio
       else if (qType === 'audioMessage') {
@@ -64,6 +77,12 @@ export default {
             audio: mediaBuffer,
             ptt: false
           }
+        }
+        
+        fallbackPayload = {
+          audio: mediaBuffer,
+          ptt: false,
+          mimetype: 'audio/mp4'
         }
       }
       // Handle Text
@@ -82,14 +101,26 @@ export default {
             font: Math.floor(Math.random() * 5)
           }
         }
+        
+        fallbackPayload = {
+          text: `📢 *GROUP ANNOUNCEMENT*\n\n${textContent}`,
+          mentions: ctx.groupMeta?.participants?.map(p => p.id) || []
+        }
       }
       else {
         return reply('❌ Unsupported type. Reply to image/video/audio/text.')
       }
 
-      // Send directly (Joy's approach)
-      await sock.sendMessage(ctx.from, statusPayload)
-      await sock.sendMessage(ctx.from, { react: { text: '✅', key: msg.key } })
+      // Try group status first, fallback to regular announcement
+      try {
+        await sock.sendMessage(ctx.from, statusPayload)
+        await sock.sendMessage(ctx.from, { react: { text: '✅', key: msg.key } })
+      } catch (statusError) {
+        // If group status fails (no linked channel), send as regular announcement
+        console.log('[gcstatus] Group status failed, using fallback:', statusError.message)
+        await sock.sendMessage(ctx.from, fallbackPayload)
+        await sock.sendMessage(ctx.from, { react: { text: '📢', key: msg.key } })
+      }
 
     } catch (e) {
       console.error('[gcstatus]', e)
